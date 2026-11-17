@@ -1,0 +1,1 @@
+export function createChemistryRenderQueue<T>(request:(kind:string,source:string)=>Promise<T>,options?:{concurrency?:number;maxEntries?:number;maxBytes?:number}):{peek:(kind:string,source:string)=>T|undefined;render:(kind:string,source:string)=>Promise<T>};

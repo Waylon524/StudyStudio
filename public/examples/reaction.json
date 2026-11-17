@@ -1,0 +1,34 @@
+{
+  "style_preset": "presentation",
+  "rows": [
+    {
+      "items": [
+        {
+          "smiles": "O=C(O)c1ccccc1O",
+          "label": "Salicylic acid"
+        },
+        {
+          "type": "plus"
+        },
+        {
+          "smiles": "CC(=O)OC(C)=O",
+          "label": "Acetic anhydride"
+        },
+        {
+          "type": "arrow"
+        },
+        {
+          "smiles": "CC(=O)Oc1ccccc1C(=O)O",
+          "label": "Aspirin"
+        },
+        {
+          "type": "plus"
+        },
+        {
+          "smiles": "CC(=O)O",
+          "label": "Acetic acid"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {prepareTeachingSpec} from '../shared/teaching-ui.mjs';
+const canvas={type:'canvas',id:'motion',title:'运动演示',html:'<canvas></canvas><script>requestAnimationFrame(()=>{})</script>'};
+const question={id:'q1',type:'true_false',prompt:'这是演示吗？',answer:true};
+const {spec,questionSpec,canvases}=prepareTeachingSpec({id:'lesson',blocks:[canvas,{type:'tabs',tabs:[{label:'检查理解',blocks:[{type:'question',question}]}]}]});
+assert.equal(spec.blocks[0].height,420);assert.equal(canvases.length,1);assert.equal(questionSpec.items[0],question);
+assert.equal(prepareTeachingSpec({blocks:[canvas]}).questionSpec,null);
+assert.equal(prepareTeachingSpec({items:[question]}).questionSpec.items.length,1);
+assert.throws(()=>prepareTeachingSpec({blocks:[canvas,canvas]}),/重复/);
+assert.throws(()=>prepareTeachingSpec({blocks:[{...canvas,html:''}]}),/内容/);
+assert.throws(()=>prepareTeachingSpec({blocks:[{type:'script',html:'bad'}]}),/类型/);
+assert.throws(()=>prepareTeachingSpec({blocks:[{type:'question',question:{...question,answer:'yes'}}]}),/布尔/);
+let nested=canvas;for(let i=0;i<7;i++)nested={type:'tabs',tabs:[{label:'层',blocks:[nested]}]};
+assert.throws(()=>prepareTeachingSpec({blocks:[nested]}),/层级/);
+assert.throws(()=>prepareTeachingSpec({blocks:Array.from({length:6},(_,i)=>({...canvas,id:'c'+i,html:'x'.repeat(100000)}))}),/过大/);
+console.log('Teaching UI passed: mixed questions/canvases, pure animation, normalized height, duplicate IDs, input bounds, hierarchy, and invalid questions.');

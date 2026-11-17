@@ -1,0 +1,14 @@
+.course-requirements{border-bottom:1px solid #e6ede2;margin:0 1px 17px;padding-bottom:13px}
+.course-requirements-heading{display:flex;align-items:center;gap:6px;padding:0 0 2px;width:100%;border:0;background:none;text-align:left;color:#678460;font-size:12px;cursor:pointer}
+.course-requirements-heading small{font-size:10px;color:#a2b29b;margin-left:auto}
+.course-requirements-content{padding-top:10px}
+.course-requirement{padding:10px 0;border-top:1px solid #edf1e9;overflow-wrap:anywhere}
+.course-requirement:first-child{border-top:0;padding-top:0}
+.course-requirement:last-child{padding-bottom:0}
+.requirement-meta{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:10px;line-height:1.7;color:#a3b39c}
+.requirement-status{color:#789470}
+.requirement-status.unverified,.requirement-status.conflicted{color:#ac8c62}
+.requirement-text{font-size:12px;line-height:1.9;color:#607b58;margin:6px 0;white-space:pre-wrap}
+.requirement-condition{font-size:11px;line-height:1.8;color:#998c6a;margin:5px 0 7px;white-space:pre-wrap}
+.requirement-error{font-size:11px;color:#ad8d69;line-height:1.8;margin:0}
+.requirement-empty{font-size:11px;line-height:1.9;color:#a1a997;margin:2px 0 4px}

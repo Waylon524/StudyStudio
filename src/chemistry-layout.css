@@ -1,0 +1,13 @@
+/* Chemical figures use native vector elements at the surrounding formula scale. */
+.markdown .chem-figure{margin:.8em 0 1em}
+.chem-structure{display:block;max-width:100%;margin:.4em 0 .6em;line-height:normal;color:#000}
+.chem-structure>svg{display:block;height:auto;max-width:100%;margin:0 auto;overflow:visible;fill:currentColor;user-select:text;-webkit-user-select:text}
+.chem-structure[data-kind="molecule"]>svg{max-height:11em}
+.chem-structure[data-kind="reaction"],.chem-structure[data-kind="mechanism"]{overflow-x:auto;overflow-y:hidden}
+.chem-structure[data-kind="reaction"]>svg,.chem-structure[data-kind="mechanism"]>svg{max-width:none;max-height:none}
+.chem-structure>svg text,.chem-structure>svg tspan{user-select:text;-webkit-user-select:text;cursor:text}
+.chem-structure[data-inline="true"]{display:inline-block;max-width:100%;margin:0 .18em;vertical-align:-.35em;line-height:1}
+.chem-structure[data-inline="true"]>svg{display:inline-block;vertical-align:bottom;margin:0}
+.chem-formula-inline .figure-loading{display:inline-flex;min-height:0;gap:.3em;font-size:.85em;vertical-align:baseline}
+.chem-svg-error{font-size:.85em;color:#976339}
+.markdown .chem-figure .figure-loading{min-height:56px}

@@ -1,0 +1,52 @@
+{
+  "name": "study-studio-local",
+  "version": "0.20.9",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server/index.mjs",
+    "dev:ui": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "prebuild": "node scripts/prepare-pdf-assets.mjs",
+    "predev:ui": "node scripts/prepare-pdf-assets.mjs"
+  },
+  "dependencies": {
+    "katex": "0.18.7",
+    "lucide-react": "^0.468.0",
+    "micromark-core-commonmark": "2.0.4",
+    "micromark-util-classify-character": "2.0.1",
+    "pdfjs-dist": "6.5.438",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/katex": "^0.16.7",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.2.0"
+  },
+  "overrides": {
+    "katex": "0.18.7"
+  },
+  "license": "MIT",
+  "author": "Weilun Qian",
+  "description": "A local-first AI study workspace with persistent course conversations, PDF reading, and interactive practice.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Waylon524/StudyStudio.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Waylon524/StudyStudio/issues"
+  },
+  "homepage": "https://github.com/Waylon524/StudyStudio#readme",
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

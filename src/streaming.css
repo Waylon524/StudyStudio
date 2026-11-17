@@ -1,0 +1,4 @@
+.message.assistant.is-streaming>.markdown::after{content:'';display:inline-block;width:5px;height:12px;margin:2px 0 0 3px;border-radius:2px;background:#bba58f;vertical-align:baseline;animation:answer-caret 1s ease-in-out infinite}
+@keyframes answer-caret{0%,100%{opacity:.3}50%{opacity:.9}}
+.answer-incomplete{display:block;margin-top:9px;color:#aaa198;font-size:11px;line-height:1.6}
+@media(prefers-reduced-motion:reduce){.message.assistant.is-streaming>.markdown::after{animation:none;opacity:.65}}

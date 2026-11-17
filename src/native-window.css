@@ -1,0 +1,10 @@
+html.study-native-window{--native-window-inset:96px}
+html.study-native-window .studio-topbar{padding-left:var(--native-window-inset)}
+html.study-native-window .studio-course-add{left:calc(220px + var(--native-window-inset))}
+@media(max-width:1100px){
+  html.study-native-window .studio-brand,html.study-native-window .studio-header-divider{display:none}
+  html.study-native-window .studio-header-left{gap:8px}
+  html.study-native-window .studio-course-picker select{max-width:120px}
+  html.study-native-window .studio-course-add{left:calc(40px + var(--native-window-inset))}
+}
+@media(max-width:899px){html.study-native-window .pdf-reader-header{padding-left:var(--native-window-inset)}}

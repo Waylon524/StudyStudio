@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { LearningStore } from '../server/learning.mjs';
+
+const root=await fs.mkdtemp(path.join(os.tmpdir(),'study-store-test-'));
+try {
+  const course={id:'course-1',name:'化学'}, store=new LearningStore({root});
+  const base=await store.initCourse(course); assert.equal(base,path.join(root,'化学'));
+  await fs.writeFile(path.join(base,'AGENTS.md'),'用户原有课程说明'); await store.initCourse(course);
+  assert.equal((await store.readInstructions(course)).content,'用户原有课程说明');
+  const spec={title:'练习',items:[{id:'tf',type:'true_false',prompt:'正确吗？',answer:true},{id:'mc',type:'choice',prompt:'选项',options:[{id:'a',text:'A'},{id:'b',text:'B'}],answer:'a'},{id:'blank',type:'fill_blank',prompt:'填空',acceptedAnswers:[' NaCl ']},{id:'short',type:'short_answer',prompt:'解释',rubric:'应说明反应条件'}, {id:'card',type:'flashcard',prompt:'回忆'}]};
+  const args={threadId:'thread',itemId:'message',spec};
+  const first=await store.registerSet(course,args); const again=await store.registerSet(course,args);
+  assert.equal(first.set.id,again.set.id); const [tf,mc,blank,short,card]=first.items;
+  await fs.appendFile(path.join(base,'学习进度.md'),'\n原有手写记录\n');
+  const a=await store.submitAttempt(course,{questionId:tf.id,answer:true,clientId:'unique'});
+  assert.equal(a.attempt.grade.correct,true); assert.equal((await store.submitAttempt(course,{questionId:tf.id,answer:true,clientId:'unique'})).attempt.id,a.attempt.id);
+  assert.equal((await store.submitAttempt(course,{questionId:mc.id,answer:'b'})).attempt.grade.correct,false);
+  assert.equal((await store.submitAttempt(course,{questionId:blank.id,answer:'nacl'})).attempt.grade.correct,true);
+  const pending=(await store.submitAttempt(course,{questionId:short.id,answer:'我认为如此'})).attempt; assert.equal(pending.grade.status,'pending_feedback');
+  await store.applyFeedback(course,{attemptId:pending.id,feedback:'需要更多依据',correct:false});
+  await store.reveal(course,card.id); const self=(await store.submitAttempt(course,{questionId:card.id,answer:'good'})).attempt; assert.equal(self.grade.status,'self_assessed'); assert.equal(self.grade.correct,null); assert.equal(self.revealed,true);
+  assert.equal((await store.listItems(course)).find(x=>x.id===tf.id).latestAttempt.id,a.attempt.id);
+  const attachment=await store.upload(course,{name:'资料.txt',mime:'text/plain',data:Buffer.from('真实资料')}); assert.equal((await store.readFile(course,attachment.relativePath)).text,'真实资料');
+  await assert.rejects(store.readFile(course,'../outside')); await fs.symlink('/etc',path.join(base,'escape')); await assert.rejects(store.readFile(course,'escape/passwd'));
+  await assert.rejects(store.initCourse({id:'different',name:'化学'}));
+  const instructions=await store.readInstructions(course); await store.updateInstructions(course,{content:'更新后的说明',version:instructions.version}); await assert.rejects(store.updateInstructions(course,{content:'过期内容',version:instructions.version}));
+  await store.recordTurn(course,{threadId:'thread',text:'完成一次练习'}); await store.addCourseNote(course,{text:'老师强调范围',source:'课堂记录',kind:'教师信息'});
+  await store.addCourseNote(course,{text:'尚需核对的归纳'});
+  const context=await store.context(course); assert(context.includes('更新后的说明')); assert(context.includes('完成一次练习')); assert(context.includes('老师强调范围')); assert(context.includes('课堂记录')); assert(context.includes('应说明反应条件')); assert(context.includes('user_answer')); assert(!context.includes('已掌握全部')); assert(context.includes('\n'));
+  const summary=await store.learning(course); assert.equal(summary.attempts.length,5); assert(summary.importantInfo.includes('课堂记录')); assert(summary.importantInfo.includes('AI 归纳（待核实）'));
+  assert(summary.progress.includes('原有手写记录')); assert(summary.progress.includes('客观题判定正确')); assert(summary.progress.includes('简答题等待反馈')); assert(summary.progress.includes('AI 反馈')); assert(summary.progress.includes('揭晓')); assert(summary.progress.includes('闪卡自评 good（不代表掌握）'));
+  assert.equal(summary.progress.split(a.attempt.id).length-1,1); assert(!summary.progress.includes('\\n'));
+  await fs.writeFile(path.join(base,'自行放入.txt'),'课程原文');
+  const sources=await store.listSources(course); assert(sources.some(x=>x.name==='资料.txt'&&x.attachmentId===attachment.id&&x.selected)); assert(sources.some(x=>x.name==='自行放入.txt'&&x.selected)); assert(!sources.some(x=>x.name==='AGENTS.md'));
+  const manual=sources.find(x=>x.name==='自行放入.txt'), uploaded=sources.find(x=>x.name==='资料.txt');
+  await store.selectSources(course,[manual.id]); assert.equal((await store.listSources(course)).find(x=>x.id===uploaded.id).selected,false); assert.equal((await store.selectedSourceRead(course,manual.relativePath)).sourceId,manual.id); await assert.rejects(store.selectedSourceRead(course,uploaded.relativePath));
+  assert((await store.context(course)).includes(manual.id)); assert((await store.context(course)).includes(uploaded.id)); assert.equal((await store.workspaceRead(course,uploaded.relativePath)).text,'真实资料');
+  await store.updateMemory(course,{operation:'upsert',category:'preferences',id:'short',text:'讲解简洁',source:'用户本轮消息',evidence:'讲解简洁'});
+  let agents=(await store.readInstructions(course)).content; assert(agents.includes('更新后的说明')); assert(agents.includes('讲解简洁'));
+  assert.equal((await store.updateMemory(course,{operation:'upsert',category:'preferences',id:'short',text:'讲解简洁',source:'用户本轮消息',evidence:'讲解简洁'})).changed,false);
+  await store.updateMemory(course,{operation:'upsert',category:'preferences',id:'short',text:'讲解详细',source:'用户本轮消息',evidence:'讲解详细'}); agents=(await store.readInstructions(course)).content; assert(!agents.includes('讲解简洁')); assert(agents.includes('讲解详细'));
+  await store.updateMemory(course,{operation:'delete',category:'preferences',id:'short'}); agents=(await store.readInstructions(course)).content; assert(!agents.includes('讲解详细')); const raw=await fs.readFile(path.join(base,'.study-studio/state.json'),'utf8'); assert(!raw.includes('讲解简洁')); assert(!raw.includes('讲解详细'));
+  await fs.writeFile(path.join(base,'AGENTS.md'),agents.replace('已记录的课程偏好与约定','人工修改的记忆')); await assert.rejects(store.updateMemory(course,{operation:'upsert',category:'courseRules',id:'rule',text:'示例',source:'用户',evidence:'示例'}));
+  console.log('LearningStore: registration, grading, feedback, self-assessment, persistence, attachments, containment, conflict handling, and context passed.');
+} finally { await fs.rm(root,{recursive:true,force:true}); }

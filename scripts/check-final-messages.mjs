@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {finalAssistantItems} from '../shared/final-messages.mjs';
+const item=(id,phase)=>({id,type:'agentMessage',phase,text:id});
+assert.deepEqual(finalAssistantItems([item('reading','commentary'),item('draft','partial_answer'),item('answer','final_answer')]).map(x=>x.id),['answer']);
+assert.deepEqual(finalAssistantItems([item('reading'),item('answer')]).map(x=>x.id),['answer']);
+assert.deepEqual(finalAssistantItems([item('reading','commentary')]),[]);
+assert.deepEqual(finalAssistantItems([item('partial','partial_answer')]),[]);
+assert.deepEqual(finalAssistantItems([item('a','final_answer'),item('b','final_answer')]).map(x=>x.id),['b']);
+assert.deepEqual(finalAssistantItems([]),[]);
+console.log('Final answers: commentary/partial exclusion, terminal selection and unknown-phase completion passed.');

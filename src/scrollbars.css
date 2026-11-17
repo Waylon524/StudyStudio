@@ -1,0 +1,28 @@
+/* These rules affect only scrollable surfaces inside the learning app. */
+.studio-shell *{
+  --quiet-scroll-thumb:rgba(128,123,115,.25);
+  scrollbar-width:thin;
+  scrollbar-color:var(--quiet-scroll-thumb) transparent;
+}
+.studio-shell *:hover{--quiet-scroll-thumb:rgba(128,123,115,.36)}
+
+/* Standard non-auto scrollbar properties override WebKit sizing in Chromium. */
+@supports selector(::-webkit-scrollbar){
+  .studio-shell *{scrollbar-width:auto;scrollbar-color:auto}
+  .studio-shell *::-webkit-scrollbar{width:6px;height:6px}
+  .studio-shell *::-webkit-scrollbar-track,
+  .studio-shell *::-webkit-scrollbar-corner{background:transparent}
+  .studio-shell *::-webkit-scrollbar-thumb{
+    background:var(--quiet-scroll-thumb);
+    border:1px solid transparent;
+    background-clip:padding-box;
+    border-radius:999px;
+  }
+  .studio-shell *::-webkit-scrollbar-thumb:hover,
+  .studio-shell *::-webkit-scrollbar-thumb:active{background-color:rgba(128,123,115,.48)}
+  .studio-shell *::-webkit-scrollbar-button{display:none;width:0;height:0}
+}
+
+@media(forced-colors:active){
+  .studio-shell *{scrollbar-width:thin;scrollbar-color:auto}
+}

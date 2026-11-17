@@ -1,0 +1,5 @@
+.effort-toggle{margin-left:auto;flex:none;min-width:49px;padding:7px 3px;border:0;border-radius:3px;background:transparent;box-shadow:none;color:#8a8681;font:inherit;font-size:12px;line-height:20px;font-weight:400;text-align:center;cursor:pointer;transition:color .15s}
+.effort-toggle:hover:not(:disabled){color:#4b4742;background:transparent}
+.effort-toggle:focus-visible{outline:1px solid #bcb4aa;outline-offset:2px}
+.effort-toggle:disabled{opacity:.4;cursor:default}
+@media(prefers-reduced-motion:reduce){.effort-toggle{transition:none}}

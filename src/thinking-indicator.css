@@ -1,0 +1,18 @@
+.agent-thinking{--thinking-cycle:2.8s;--thinking-color:#b49a86;--thinking-ring-opacity:.54;display:flex;align-items:center;gap:10px;min-height:42px;margin:17px 0 25px 39px;color:#8c8275;font-size:12px;line-height:1.6;contain:layout style}
+.agent-thinking[data-effort=high]{--thinking-cycle:2s;--thinking-color:#bc8c70;--thinking-ring-opacity:.72}
+.agent-thinking[data-effort=xhigh]{--thinking-cycle:1.35s;--thinking-color:#c8795c;--thinking-ring-opacity:.88}
+.thinking-motion{position:relative;display:inline-block;width:30px;height:30px;flex:0 0 30px;color:var(--thinking-color);transition:color .3s}
+.thinking-orbit{position:absolute;border-radius:50%;border:1.5px solid transparent;will-change:transform}
+.thinking-orbit.outer{inset:3px;border-top-color:currentColor;border-right-color:currentColor;opacity:var(--thinking-ring-opacity);animation:thinkingOrbit var(--thinking-cycle) linear infinite}
+.thinking-orbit.inner{inset:8px;border-bottom-color:currentColor;border-left-color:currentColor;opacity:.5;animation:thinkingOrbit calc(var(--thinking-cycle)*.78) linear infinite reverse}
+.thinking-core{position:absolute;inset:13px;border-radius:50%;background:currentColor;box-shadow:0 0 0 3px #c8795c08;animation:thinkingBreathe var(--thinking-cycle) ease-in-out infinite}
+.thinking-label{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.thinking-dots{display:inline-flex;gap:3px;width:15px;margin-top:3px;align-items:center;height:8px}
+.thinking-dots i{width:2px;height:2px;display:block;border-radius:50%;background:currentColor;animation:thinkingDot var(--thinking-cycle) ease-in-out infinite;opacity:.32}
+.thinking-dots i:nth-child(2){animation-delay:calc(var(--thinking-cycle)*-.24)}
+.thinking-dots i:nth-child(3){animation-delay:calc(var(--thinking-cycle)*-.48)}
+@keyframes thinkingOrbit{to{transform:rotate(360deg)}}
+@keyframes thinkingBreathe{0%,100%{transform:scale(.8);opacity:.5}50%{transform:scale(1.25);opacity:1}}
+@keyframes thinkingDot{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:.85;transform:translateY(-1px)}}
+@media(max-width:1200px){.agent-thinking{margin-left:0}}
+@media(prefers-reduced-motion:reduce){.thinking-orbit,.thinking-core,.thinking-dots i{animation:none}.thinking-orbit{will-change:auto}.thinking-core{opacity:.7}}
