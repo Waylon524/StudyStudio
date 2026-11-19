@@ -45,6 +45,11 @@ export type LearningData = {
   importantInfo?: string
   progress?: string | Record<string, unknown>
 }
+export type OpenCanvasMeta = {
+  savedCanvas?: SavedCanvas
+  threadId?: string
+  itemId?: string
+}
 export type StudyContextValue = {
   courseId?: string
   threadId?: string | null
@@ -52,5 +57,6 @@ export type StudyContextValue = {
   revision?: number
   onLearningChange?: () => void
   onAskAgent?: (text: string) => void
+  onOpenCanvas?: (canvas: CanvasSpec, meta?: OpenCanvasMeta) => void
   renderMarkdown?: (text: string) => ReactNode
 }

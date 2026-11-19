@@ -5,7 +5,7 @@ import './course-avatar.css'
 
 type Primitive={type:'path';d:string}|{type:'circle';cx:number;cy:number;r:number}|{type:'ellipse';cx:number;cy:number;rx:number;ry:number}|{type:'line';x1:number;y1:number;x2:number;y2:number}|{type:'polyline';points:number[][]}
 type Avatar={status:'pending'|'ready'|'failed';icon?:{elements:Primitive[]};error?:string}
-type Props={courseId:string;size?:number;className?:string;label?:string}
+type Props={courseId:string;size?:number;className?:string;label?:string;interactive?:boolean}
 const pending:Avatar={status:'pending'},entries=new Map<string,ReturnType<typeof createEntry>>()
 function createEntry(courseId:string){
  let value:Avatar=pending,controller:AbortController|null=null,timer:ReturnType<typeof setTimeout>|null=null,inFlight=false,regenerating=false,epoch=0
@@ -38,23 +38,22 @@ function createEntry(courseId:string){
 }
 function entryFor(courseId:string){let entry=entries.get(courseId);if(!entry){entry=createEntry(courseId);entries.set(courseId,entry)}return entry}
 
-export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className='',label='课程头像'}:Props){
+export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className='',label='课程头像',interactive=true}:Props){
  const entry=entryFor(courseId),avatar=useSyncExternalStore(entry.subscribe,entry.getSnapshot,entry.getSnapshot)
  const [open,setOpen]=useState(false),[position,setPosition]=useState({left:0,top:0}),trigger=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null),menuId=useId()
  const elements=Array.isArray(avatar.icon?.elements)?avatar.icon.elements:null
- useEffect(()=>setOpen(false),[courseId])
+ useEffect(()=>setOpen(false),[courseId,interactive])
  useEffect(()=>{
   if(!open)return
   const outside=(event:PointerEvent)=>{const node=event.target as Node;if(!trigger.current?.contains(node)&&!menu.current?.contains(node))setOpen(false)}
-  const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){setOpen(false);trigger.current?.focus()}}
+  const escape=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setOpen(false);trigger.current?.focus()}}
   const close=()=>setOpen(false)
-  document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);window.addEventListener('resize',close)
+  document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape,true);window.addEventListener('resize',close)
   menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus()
-  return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);window.removeEventListener('resize',close)}
+  return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape,true);window.removeEventListener('resize',close)}
  },[open])
  function toggle(){if(open){setOpen(false);return}const rect=trigger.current?.getBoundingClientRect();if(rect)setPosition({left:Math.max(8,Math.min(rect.left,innerWidth-188)),top:Math.max(8,Math.min(rect.bottom+8,innerHeight-112))});setOpen(true)}
- return <span className={'course-avatar '+className} data-avatar-status={avatar.status} data-has-icon={!!elements} style={{width:size,height:size}}>
-  <button ref={trigger} type="button" className="course-avatar-trigger" aria-label={label} aria-haspopup="menu" aria-controls={open?menuId:undefined} aria-expanded={open} onClick={toggle} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();if(!open)toggle()}}} title={avatar.status==='pending'?'正在生成课程头像':'更换课程头像'}><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{elements?elements.map((element,index)=>{
+ const svg=<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{elements?elements.map((element,index)=>{
    switch(element.type){
     case 'path':return <path key={index} d={element.d}/>
     case 'circle':return <circle key={index} cx={element.cx} cy={element.cy} r={element.r}/>
@@ -63,7 +62,9 @@ export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className
     case 'polyline':return <polyline key={index} points={element.points.map(point=>point.join(',')).join(' ')}/>
     default:return null
    }
-  }):<><path d="M8 12 C14 10 19 12 24 16 C29 12 34 10 40 12 L40 36 C34 34 29 36 24 40 C19 36 14 34 8 36 Z"/><path d="M24 16 V40"/></>}</svg></button>
-  {open&&createPortal(<div ref={menu} id={menuId} role="menu" aria-label="课程头像选项" className="course-avatar-menu" style={position}><button type="button" role="menuitem" disabled={avatar.status==='pending'} onClick={()=>{setOpen(false);void entry.regenerate();trigger.current?.focus()}}><RefreshCw size={14}/>{avatar.status==='pending'?'正在生成…':'更换头像'}</button>{avatar.status==='failed'&&avatar.error&&<p role="status">{avatar.error}</p>}</div>,document.body)}
+  }):<><path d="M8 12 C14 10 19 12 24 16 C29 12 34 10 40 12 L40 36 C34 34 29 36 24 40 C19 36 14 34 8 36 Z"/><path d="M24 16 V40"/></>}</svg>
+ return <span className={'course-avatar '+className} data-avatar-status={avatar.status} data-has-icon={!!elements} style={{width:size,height:size}}>
+  {interactive?<button ref={trigger} type="button" className="course-avatar-trigger" aria-label={label} aria-haspopup="menu" aria-controls={open?menuId:undefined} aria-expanded={open} onClick={toggle} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();if(!open)toggle()}}} title={avatar.status==='pending'?'正在生成课程头像':'更换课程头像'}>{svg}</button>:svg}
+  {interactive&&open&&createPortal(<div ref={menu} id={menuId} role="menu" aria-label="课程头像选项" className="course-avatar-menu" style={position}><button type="button" role="menuitem" disabled={avatar.status==='pending'} onClick={()=>{setOpen(false);void entry.regenerate();trigger.current?.focus()}}><RefreshCw size={14}/>{avatar.status==='pending'?'正在生成…':'更换头像'}</button>{avatar.status==='failed'&&avatar.error&&<p role="status">{avatar.error}</p>}</div>,document.body)}
  </span>
 })

@@ -9,11 +9,11 @@ import {DISABLED_FEATURES,ENABLED_FEATURES,CLI_FEATURE_ARGS,LEARNING_FEATURES,RE
 
 const exec=promisify(execFile),root=await fs.mkdtemp(path.join(os.tmpdir(),'study-runtime-check-'));
 const terra={id:'gpt-6.1-terra',model:'gpt-6.1-terra',supportedReasoningEfforts:['medium','high','xhigh'].map(reasoningEffort=>({reasoningEffort}))};
-const sol={id:'gpt-6.1-sol',model:'gpt-6.1-sol',supportedReasoningEfforts:[{reasoningEffort:'xhigh'}]};
+const deep={id:'gpt-6.2-astra',model:'gpt-6.2-astra',supportedReasoningEfforts:[{reasoningEffort:'high'}]};
 const astra={id:'gpt-6-astra',model:'gpt-6-astra',supportedReasoningEfforts:[{reasoningEffort:'high'}]};
 let clock=1000;
 class StubBridge extends CodexBridge{
-  constructor({opaque=false}={}){super({now:()=>clock});this.calls=[];this.nextThread=0;this.external=false;this.externalRuntime=false;this.opaque=opaque;this.account={type:'chatgpt'};this.models=[terra,sol,astra];this.catalogFailure=false;}
+  constructor({opaque=false}={}){super({now:()=>clock});this.calls=[];this.nextThread=0;this.external=false;this.externalRuntime=false;this.opaque=opaque;this.account={type:'chatgpt'};this.models=[terra,deep,astra];this.catalogFailure=false;}
   async start(){}
   async request(method,params={}){
     this.calls.push({method,params});

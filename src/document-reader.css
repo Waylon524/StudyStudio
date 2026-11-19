@@ -1,0 +1,422 @@
+.doc-reader{
+  container-type:inline-size;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  height:100%;
+  min-width:0;
+  min-height:0;
+  overflow:hidden;
+  background:#fff;
+  color:#282725;
+}
+.doc-reader *{box-sizing:border-box}
+
+.doc-reader-header{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height:58px;
+  flex:0 0 58px;
+  min-width:0;
+  padding:0 12px;
+  border-bottom:1px solid #e7e5e2;
+  background:#fff;
+}
+.doc-reader-badge{
+  display:grid;
+  place-items:center;
+  flex:none;
+  width:28px;
+  height:28px;
+  border-radius:8px;
+  background:#f1f0ec;
+  color:#6c675f;
+}
+.doc-reader-badge.is-markdown{background:#edf2f7;color:#415f7c}
+.doc-reader-badge.is-html{background:#ebf5f1;color:#397362}
+.doc-reader-badge.is-canvas{background:#f2eff7;color:#6e5b8a}
+
+.doc-reader-heading{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  flex:1 1 auto;
+  min-width:0;
+}
+.doc-reader-title{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:14px;
+  font-weight:600;
+  color:#262420;
+}
+.doc-reader-folder{
+  flex:0 1 auto;
+  max-width:130px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:11px;
+  font-weight:500;
+  color:#7c756c;
+  background:#f3f1ec;
+  border:1px solid #e8e4dc;
+  border-radius:999px;
+  padding:1px 8px;
+  line-height:1.6;
+}
+.doc-reader-folder.is-canvas{
+  color:#6b5888;
+  background:#f4f0f9;
+  border-color:#e4dcf0;
+}
+
+.doc-reader-actions{
+  display:flex;
+  align-items:center;
+  gap:3px;
+  flex:none;
+}
+.doc-reader-pill-btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  height:30px;
+  padding:0 9px;
+  border:1px solid #e2ddd5;
+  border-radius:7px;
+  background:#faf8f4;
+  color:#6e513f;
+  font:inherit;
+  font-size:12px;
+  font-weight:500;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:background .14s,border-color .14s,color .14s;
+}
+.doc-reader-pill-btn:hover:not(:disabled){
+  background:#f6ede5;
+  border-color:#d8c1b2;
+  color:#9d4d31;
+}
+.doc-reader-pill-btn.is-saved{
+  background:#eff6f1;
+  border-color:#d2e4d8;
+  color:#48745a;
+}
+.doc-reader-pill-btn:disabled{opacity:.65;cursor:default}
+
+.doc-reader-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:none;
+  width:30px;
+  height:30px;
+  padding:0;
+  border:0;
+  border-radius:7px;
+  background:transparent;
+  color:#66635e;
+  text-decoration:none;
+  cursor:pointer;
+  transition:background .14s,color .14s;
+}
+.doc-reader-icon:hover:not(:disabled){background:#f1efec;color:#282725}
+.doc-reader-icon.is-active{background:#f2eae2;color:#a1583d}
+.doc-reader-icon:disabled{opacity:.38;cursor:default}
+.doc-reader button:focus-visible,.doc-reader a:focus-visible{
+  outline:2px solid #c36b4e;
+  outline-offset:2px;
+}
+
+.doc-reader-spin{animation:doc-reader-rotate .8s linear infinite}
+@keyframes doc-reader-rotate{to{transform:rotate(360deg)}}
+
+.doc-reader-top-alert{
+  flex:none;
+  padding:7px 14px;
+  font-size:12px;
+  line-height:1.5;
+  border-bottom:1px solid #eee8de;
+}
+.doc-reader-top-alert.is-warn{background:#fcf6eb;color:#936231}
+.doc-reader-top-alert.is-error{background:#fdf2f0;color:#ab4b3a}
+
+.doc-reader-body{
+  display:flex;
+  flex:1;
+  min-width:0;
+  min-height:0;
+  position:relative;
+  overflow:hidden;
+  background:#f5f4f1;
+}
+
+/* Markdown Collapsible Outline */
+.doc-reader-outline{
+  width:166px;
+  flex:0 0 166px;
+  min-height:0;
+  overflow:auto;
+  padding:14px 8px 24px;
+  background:#faf9f6;
+  border-right:1px solid #e6e2da;
+  overscroll-behavior:contain;
+}
+.doc-reader-outline-title{
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.04em;
+  color:#8f887e;
+  padding:0 8px 8px;
+}
+.doc-reader-outline ul{
+  list-style:none;
+  margin:0;
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.doc-reader-outline li button{
+  display:block;
+  width:100%;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:#524d45;
+  font:inherit;
+  font-size:12px;
+  line-height:1.45;
+  text-align:left;
+  padding:5px 8px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.doc-reader-outline li button:hover{background:#eeece6;color:#24221f}
+.doc-reader-outline li.level-1 button{font-weight:600;color:#2f2c27}
+.doc-reader-outline li.level-2 button{padding-left:14px}
+.doc-reader-outline li.level-3 button{padding-left:24px;font-size:11.5px;color:#6c665d}
+.doc-reader-outline li.level-4 button{padding-left:32px;font-size:11px;color:#7f7970}
+
+/* Markdown Stage & Elevated Reading Sheet */
+.doc-reader-stage{
+  flex:1;
+  min-width:0;
+  min-height:0;
+  overflow:auto;
+  overscroll-behavior:contain;
+}
+.doc-reader-md-stage{
+  padding:18px 18px 32px;
+  background:#f5f4f1;
+}
+.doc-reader-html-stage{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#fff;
+}
+
+.doc-reader-sheet{
+  max-width:780px;
+  margin:0 auto;
+  min-height:100%;
+  background:#fff;
+  border:1px solid #e9e5dd;
+  border-radius:12px;
+  padding:28px 34px 44px;
+  box-shadow:0 2px 14px rgba(32,27,21,.04);
+}
+
+.doc-reader-notice{
+  padding:9px 12px;
+  border-radius:8px;
+  font-size:12px;
+  line-height:1.6;
+  margin:0 0 18px;
+}
+.doc-reader-notice.is-warn{background:#fcf6eb;border:1px solid #efdfc2;color:#936231}
+.doc-reader-notice.is-error{background:#fdf2f0;border:1px solid #f0d2cc;color:#ab4b3a}
+
+.doc-reader-markdown{
+  min-width:0;
+}
+.doc-reader-markdown .markdown{
+  font-size:14.5px;
+  line-height:1.9;
+  color:#31302d;
+}
+.doc-reader-markdown .markdown h1{
+  font-size:22px;
+  line-height:1.4;
+  margin:0 0 18px;
+  padding-bottom:10px;
+  border-bottom:1px solid #eeebe4;
+  color:#201f1c;
+}
+.doc-reader-markdown .markdown h2{
+  font-size:18px;
+  line-height:1.45;
+  margin:26px 0 14px;
+  color:#252320;
+}
+.doc-reader-markdown .markdown h3{
+  font-size:15.5px;
+  line-height:1.5;
+  margin:20px 0 10px;
+  color:#2c2a26;
+}
+.doc-reader-markdown .markdown h1,
+.doc-reader-markdown .markdown h2,
+.doc-reader-markdown .markdown h3,
+.doc-reader-markdown .markdown h4{
+  scroll-margin-top:16px;
+}
+.doc-reader-markdown .markdown hr{
+  border:0;
+  border-top:1px solid #eae6de;
+  margin:24px 0;
+}
+.doc-reader-markdown .markdown table{
+  display:block;
+  max-width:100%;
+  overflow-x:auto;
+  font-size:13.5px;
+}
+.doc-reader-markdown .markdown img{
+  max-width:100%;
+  height:auto;
+  border-radius:8px;
+}
+.doc-reader-markdown .markdown .katex-display{
+  margin:20px 0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:4px 2px;
+}
+
+.doc-reader-source{
+  margin:0;
+  padding:0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+  font-size:12.5px;
+  line-height:1.75;
+  color:#3d3a35;
+  white-space:pre-wrap;
+  word-break:break-word;
+  tab-size:2;
+}
+
+.doc-reader-status{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  min-height:240px;
+  height:100%;
+  padding:24px;
+  text-align:center;
+  font-size:13px;
+  color:#857f76;
+}
+.doc-reader-status.is-error{color:#a55542}
+.doc-reader-status p{margin:0;max-width:340px;line-height:1.65}
+.doc-reader-status button{
+  border:1px solid #e2dad0;
+  border-radius:7px;
+  background:#fff;
+  color:#6c5342;
+  padding:6px 13px;
+  font-size:12px;
+  font-weight:500;
+  cursor:pointer;
+}
+.doc-reader-status button:hover{background:#f5f0e8}
+
+.doc-reader-empty{
+  padding:48px 16px;
+  text-align:center;
+  font-size:13px;
+  color:#908a80;
+}
+
+/* HTML Full-Height Sandboxed Stage */
+.doc-reader-html-frame{
+  position:relative;
+  flex:1;
+  width:100%;
+  height:100%;
+  min-width:0;
+  min-height:0;
+  background:#fff;
+}
+.doc-reader-html-frame>iframe{
+  display:block;
+  width:100%;
+  height:100%;
+  border:0;
+  background:#fff;
+}
+
+.doc-reader-runtime-banner{
+  position:absolute;
+  left:12px;
+  right:12px;
+  bottom:12px;
+  z-index:10;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:9px 12px;
+  border:1px solid #ecd6c8;
+  border-radius:9px;
+  background:rgba(255,250,245,.96);
+  box-shadow:0 6px 20px rgba(32,24,18,.12);
+  color:#9b5b3e;
+  font-size:12px;
+  line-height:1.5;
+}
+.doc-reader-runtime-banner>span{
+  flex:1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.doc-reader-runtime-banner>button{
+  flex:none;
+  border:1px solid #e1cbbd;
+  border-radius:6px;
+  background:#fff;
+  color:#7a4d38;
+  padding:4px 9px;
+  font:inherit;
+  font-size:11.5px;
+  cursor:pointer;
+}
+.doc-reader-runtime-banner>button:hover{background:#f7efe8}
+
+@container(max-width:520px){
+  .doc-reader-folder{display:none}
+  .doc-reader-pill-btn{width:30px;padding:0;border-color:transparent;background:transparent}
+  .doc-reader-pill-btn>span{display:none}
+  .doc-reader-md-stage{padding:12px 10px 24px}
+  .doc-reader-sheet{padding:20px 18px 32px;border-radius:10px}
+  .doc-reader-outline{width:148px;flex-basis:148px}
+}
+@media(max-width:600px){
+  .doc-reader-header{min-height:54px;flex-basis:54px;padding-inline:8px;gap:5px}
+  .doc-reader-title{font-size:13px}
+}
+@media(prefers-reduced-motion:reduce){
+  .doc-reader-spin{animation:none}
+}

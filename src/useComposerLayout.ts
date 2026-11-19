@@ -7,7 +7,7 @@ export function useComposerLayout({input,frame,area,scroller,value,auxiliaryKey}
  const fit=useCallback(()=>{
   const field=input.current,container=frame.current,overlay=area.current
   if(!field||!container||!overlay)return
-  const minimum=parseFloat(getComputedStyle(field).minHeight)||56
+  const minimum=parseFloat(getComputedStyle(field).minHeight)||28
   const chrome=Math.max(0,overlay.getBoundingClientRect().height-field.getBoundingClientRect().height)
   const transcriptSpace=container.classList.contains('is-empty')?140:100
   const maximum=Math.max(minimum,Math.min(640,container.clientHeight*.6,container.clientHeight-chrome-transcriptSpace))

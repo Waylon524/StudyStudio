@@ -35,12 +35,12 @@ export function CourseSchedule({courseId,revision}:Props){
  },[courseId,revision])
  let lastDate=''
  return <section className="course-schedule" aria-label="课程日程">
-  <div className="course-schedule-toolbar"><h2>日程</h2></div>
+  <div className="course-schedule-toolbar"><h2>日程</h2>{events.length>0&&<small>{events.length}</small>}</div>
   {error&&<p className="schedule-error" role="alert">{error}</p>}
-  {loading&&!events.length?<div className="schedule-loading"><span className="spinner"/>正在读取…</div>:!events.length?<div className="schedule-empty"><CalendarDays size={28}/><p>对话中的重要时间会记录在这里。</p></div>:<ol className="schedule-list">{events.map(event=>{
+  {loading&&!events.length?<div className="schedule-loading"><span className="spinner"/>正在读取…</div>:!events.length?<div className="schedule-empty"><div className="schedule-empty-icon"><CalendarDays size={22}/></div><p>对话中的考试与重要日期会记录在这里。</p></div>:<ol className="schedule-list">{events.map(event=>{
    const date=event.start?localDate(event.start,event.timezone):'',showDate=date!==lastDate||!date;lastDate=date
    const time=timeLabel(event)
-   return <li key={event.id} className={'schedule-event'+(!event.start?' unresolved':'')}>
+   return <li key={event.id} className={'schedule-event status-'+event.status+(!event.start?' unresolved':'')}>
     {showDate&&<div className="schedule-date">{date?<time dateTime={date}>{formatDate(date)}</time>:<span>待确认时间</span>}</div>}
     <div className="schedule-event-line"><span className="schedule-point" aria-hidden="true"/><div className="schedule-event-content">
      {time&&<p className="schedule-event-time">{time}</p>}<p className="schedule-event-title">{event.title}</p>

@@ -1,6 +1,6 @@
 {
   "name": "study-studio-local",
-  "version": "0.20.9",
+  "version": "0.20.22",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,6 +25,10 @@
     "remark-math": "^6.0.0"
   },
   "devDependencies": {
+    "@embedpdf/engine": "3.3.0",
+    "@embedpdf/engine-core": "3.3.0",
+    "@embedpdf/react": "3.3.0",
+    "@embedpdf/viewer-react": "3.3.0",
     "@types/katex": "^0.16.7",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

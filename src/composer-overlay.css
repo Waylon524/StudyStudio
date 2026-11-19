@@ -12,12 +12,16 @@
 @media(prefers-reduced-motion:reduce){.conversation-bottom-button{animation:none}}
 .studio-body .conversation .composer{background:#fff;box-shadow:0 5px 24px #25252509;pointer-events:auto}
 .studio-body .conversation .app-error,.studio-body .conversation .pending-attachments{pointer-events:auto}
-.studio-body .composer textarea{height:auto;max-height:none;min-height:58px;overflow-y:hidden;resize:none;scrollbar-width:thin}
+.studio-body .composer textarea{height:auto;max-height:none;min-height:calc(1lh + 2px);overflow-y:hidden;resize:none;scrollbar-width:thin}
 .studio-body .composer-footer>.send-button{width:34px;height:34px;border-radius:50%}
 .studio-body .conversation.is-empty{padding-bottom:clamp(16px,7vh,72px)}
 .studio-body .conversation.is-empty .message-end{height:0}
-@media(max-width:600px){.studio-body .composer textarea{min-height:54px}.studio-body .conversation:not(.is-empty) .composer-column{padding-bottom:12px}}
+@media(max-width:600px){.studio-body .conversation:not(.is-empty) .composer-column{padding-bottom:12px}}
 
 .studio-body .composer-footer>.continue-button{height:34px;flex-shrink:0;padding:0 12px;border:1px solid #e3e0da;border-radius:17px;background:#fff;color:#68645e;font-size:13px;line-height:1;white-space:nowrap}
 .studio-body .composer-footer>.continue-button:hover:not(:disabled){background:#f6f4f0;border-color:#cfc9c0;color:#383630}
 .studio-body .composer-footer>.continue-button:disabled{opacity:.45}
+
+.pending-attachments>.pdf-selection-chip{max-width:min(100%,420px)}
+.pdf-selection-chip>svg,.pdf-selection-chip>button,.pdf-selection-page{flex-shrink:0}
+.pdf-selection-excerpt{min-width:0;overflow:hidden;text-overflow:ellipsis}

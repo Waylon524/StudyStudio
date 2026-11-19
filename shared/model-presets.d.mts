@@ -1,0 +1,18 @@
+export type ThinkingPreset='fast'|'default'|'deep';
+export type ReasoningEffort=string|null;
+export type ThinkingPresetSlot={label:string;model:string;effort:ReasoningEffort};
+export type ThinkingPresetConfigs=Record<ThinkingPreset,ThinkingPresetSlot>;
+export type ThinkingPresetOverride=Partial<Record<ThinkingPreset,{model:string;effort:ReasoningEffort}>>;
+export const MODEL_ID:'gpt-6.1-terra';
+export const DEEP_MODEL_ID:'gpt-6.2-astra';
+export const PRESET_STORAGE_KEY:string;
+export const PRESET_CONFIGS_STORAGE_KEY:string;
+export const LEGACY_EFFORT_STORAGE_KEY:string;
+export const THINKING_PRESETS:readonly ThinkingPreset[];
+export const DEFAULT_PRESET_CONFIGS:Readonly<Record<ThinkingPreset,Readonly<ThinkingPresetSlot>>>;
+export function isValidModelId(value:unknown):value is string;
+export function isValidEffort(value:unknown):value is string|null;
+export function normalizePresetConfigs(raw:unknown):ThinkingPresetConfigs;
+export function thinkingPreset(value:ThinkingPreset,configs?:ThinkingPresetOverride|ThinkingPresetConfigs):Readonly<ThinkingPresetSlot>;
+export function effortLabel(effort:ReasoningEffort):string;
+export function restoreThinkingPreset(value:string|null,legacyEffort:string|null):ThinkingPreset;

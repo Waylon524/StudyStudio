@@ -57,8 +57,61 @@ export class ImportOrganizer {
   async moveAndConfirmSource(course,request) {
     return this._withFileChange(course,async()=>{
       const moved=await this.store.moveSource(course,request);
-      await this._confirmSource(course,moved.id);
+      const confirmation=await this._confirmSource(course,moved.id);
+      if(!confirmation)await this._publish(course,{status:'moved',sourceId:moved.id});
       return moved;
+    });
+  }
+  async moveAndConfirmSources(course,{sourceIds,folder,requirePdf=false}) {
+    if(!Array.isArray(sourceIds)||!sourceIds.length||sourceIds.length>200||sourceIds.some(id=>typeof id!=='string'||!id)||new Set(sourceIds).size!==sourceIds.length)throw Object.assign(Error('请选择要移动的文件。'),{status:400});
+    return this._withFileChange(course,async()=>{
+      const moved=[];
+      for(const sourceId of sourceIds){
+        const result=await this.store.moveSource(course,{sourceId,folder,requirePdf});
+        await this._confirmSource(course,result.id);
+        moved.push(result);
+      }
+      await this._publish(course,{status:'moved',sourceIds:moved.map(item=>item.id)});
+      return {sources:moved};
+    });
+  }
+  async renameSource(course,request) {
+    return this._withFileChange(course,async()=>{
+      const renamed=await this.store.renameSource(course,request);
+      await this._publish(course,{status:'renamed',sourceId:renamed.id});
+      return renamed;
+    });
+  }
+  async deleteSources(course,sourceIds,{onSourceDeleted}={}) {
+    if(!Array.isArray(sourceIds)||!sourceIds.length||sourceIds.length>200||sourceIds.some(id=>typeof id!=='string'||!id)||new Set(sourceIds).size!==sourceIds.length)throw Object.assign(Error('请选择要删除的文件。'),{status:400});
+    return this._withFileChange(course,async()=>{
+      const deletedIds=[],attachmentIds=[],missingIds=[];
+      let closedReader=false;
+      for(const sourceId of sourceIds){
+        let result;
+        try{result=await this.store.deleteSource(course,sourceId);}
+        catch(error){if(error.status===404&&sourceIds.length>1){missingIds.push(sourceId);continue;}throw error;}
+        deletedIds.push(result.sourceId);
+        if(result.attachmentId)attachmentIds.push(result.attachmentId);
+        if(result.closedReader)closedReader=true;
+        if(onSourceDeleted)await onSourceDeleted(result.sourceId);
+      }
+      if(deletedIds.length)await this._publish(course,{status:'deleted',sourceIds:deletedIds});
+      return {deletedIds,attachmentIds,missingIds,closedReader};
+    });
+  }
+  async renameFolder(course,request) {
+    return this._withFileChange(course,async()=>{
+      const result=await this.store.renameFolder(course,request);
+      await this._publish(course,{status:'folder_renamed',path:result.path});
+      return result;
+    });
+  }
+  async deleteFolder(course,folderPath) {
+    return this._withFileChange(course,async()=>{
+      const result=await this.store.deleteFolder(course,folderPath);
+      await this._publish(course,{status:'folder_deleted',path:result.path});
+      return result;
     });
   }
   async _publish(course,job) { try { await this.onUpdate(course,snapshot(job)); } catch { /* A notification failure must not change a saved job. */ } }
@@ -170,7 +223,9 @@ export class ImportOrganizer {
       const attachments=[];
       for(const attachmentId of job.attachmentIds){
         if(done.has(attachmentId))continue;
-        const info=await this.store.attachment(course,attachmentId),stat=await fs.stat(info.absolutePath);
+        let info,stat;
+        try{info=await this.store.attachment(course,attachmentId);stat=await fs.stat(info.absolutePath);}
+        catch{done.set(attachmentId,{attachmentId,status:'completed',resolution:'removed',reason:'文件已被用户移除。'});continue;}
         const read=await this.store.readFile(course,info.relativePath);
         const text=typeof read.text==='string'?read.text.slice(0,maxPreview):'';
         attachments.push({attachmentId,name:info.name,mime:info.mime,size:info.size,relativePath:info.relativePath,absolutePath:info.absolutePath,kind:read.kind,text,truncated:!!read.truncated || (read.text?.length||0)>text.length,warning:read.warning||null,fileVersion:{size:stat.size,mtimeMs:stat.mtimeMs,ino:stat.ino},contentAvailable:!!text.trim()});
@@ -191,7 +246,11 @@ export class ImportOrganizer {
       for(const attachment of attachments){
         await this._withFileChange(course,async()=>{
         const currentState=await this.store._load(course),currentAttachment=currentState.attachments.find(a=>a.id===attachment.attachmentId);
-        if(currentAttachment && await this._confirmed(course,currentState,currentAttachment)){
+        if(!currentAttachment){
+          items.push({attachmentId:attachment.attachmentId,status:'completed',resolution:'removed',reason:'文件已被用户移除。'});
+          job=await this._change(course,id,{items:[...items]});return;
+        }
+        if(await this._confirmed(course,currentState,currentAttachment)){
           const confirmation=currentState.importConfirmations[attachment.attachmentId];
           items.push({attachmentId:attachment.attachmentId,status:'completed',resolution:'user_category_confirmation',relativePath:currentAttachment.relativePath,sourceId:confirmation.sourceId,reason:'已保留用户明确确认的分类。'});
           job=await this._change(course,id,{items:[...items]});return;

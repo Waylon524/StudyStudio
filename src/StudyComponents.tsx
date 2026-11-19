@@ -99,7 +99,7 @@ export function CanvasCard({canvas,savedCanvas}:{canvas:CanvasSpec;savedCanvas?:
     if(!saved||!context.courseId)return
     void studyApi('/courses/'+encodeURIComponent(context.courseId)+'/canvas/activity',{canvasId:saved.id,kind:'reported_interaction',...value}).catch(()=>{})
   }
-  return <TeachingCanvas canvas={canvas} saved={Boolean(saved)} onSave={context.courseId&&context.threadId&&context.itemId?save:undefined} onReport={report}/>
+  return <TeachingCanvas canvas={canvas} saved={Boolean(saved)} onSave={context.courseId&&context.threadId&&context.itemId?save:undefined} onReport={report} onOpenInReader={context.onOpenCanvas?()=>context.onOpenCanvas!(canvas,{savedCanvas:saved||undefined,threadId:context.threadId||undefined,itemId:context.itemId}):undefined}/>
 }
 function CanvasBlock({block,disabled}:{block:UIBlock;disabled:boolean}){
   if(disabled)return <div className="study-component-loading"><span className="spinner"/>正在准备教学画布…</div>

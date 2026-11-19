@@ -1,23 +1,69 @@
-.course-schedule{padding:19px 0 28px;color:#646464;font-size:12px}
-.course-schedule-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 17px}
-.course-schedule-toolbar h2{font-size:13px;font-weight:500;color:#5d5d5d;margin:0}
+.course-schedule{padding:14px 0 18px;color:#3f3c37;font-size:12px}
+.course-schedule-toolbar{display:flex;align-items:center;gap:7px;margin:0 0 12px}
+.course-schedule-toolbar h2{font-size:12.5px;font-weight:600;color:#262420;margin:0}
+.course-schedule-toolbar small{
+ font-size:10.5px;color:#7c766d;background:#ece9e2;border-radius:999px;
+ padding:0 7px;line-height:1.6;font-variant-numeric:tabular-nums;
+}
 .schedule-list{list-style:none;padding:0;margin:0}
 .schedule-event{margin:0;padding:0}
-.schedule-date{padding:13px 0 10px;font-size:11px;color:#8d8d8d;line-height:1.7}
+.schedule-date{
+ padding:12px 0 7px;font-size:11px;font-weight:550;color:#868076;
+ letter-spacing:.01em;line-height:1.5;font-variant-numeric:tabular-nums;
+}
 .schedule-event:first-child>.schedule-date{padding-top:0}
-.schedule-event-line{display:flex;position:relative;align-items:flex-start;gap:9px;margin-left:3px;padding:0 0 21px 12px;border-left:1px solid #d9d9d9}
+.schedule-event-line{
+ display:flex;position:relative;align-items:flex-start;
+ margin-left:4px;padding:0 0 10px 14px;
+ border-left:1.5px solid #e7e3db;
+}
 .schedule-event:last-child>.schedule-event-line{border-left-color:transparent;padding-bottom:0}
-.schedule-point{position:absolute;left:-3.5px;top:7px;width:6px;height:6px;border-radius:50%;border:1px solid #b7b7b7;background:#fbfaf7}
-.schedule-event-content{flex:1;min-width:0}
-.schedule-event-time{color:#909090;font-size:11px;margin:0 0 4px;line-height:1.7}
-.schedule-event-title{font-size:12px;color:#646464;line-height:1.9;overflow-wrap:anywhere;white-space:pre-wrap;margin:0}
-.schedule-event-condition{color:#8e8e8e;font-size:11px;line-height:1.8;margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
-.schedule-event-status{display:inline-block;color:#af8959;font-size:10px;margin-top:5px;line-height:1.7}
-.schedule-event-status.conflicted{color:#b27b58}
-.schedule-empty{padding:52px 7px 35px;text-align:center;color:#9e9e9e}
-.schedule-empty>svg{display:block;margin:0 auto 16px;stroke-width:1.4}
-.schedule-empty p{font-size:12px;line-height:1.9;margin:0;color:#9a9a9a}
-.schedule-loading{display:flex;align-items:center;justify-content:center;gap:8px;min-height:130px;color:#9c9c9c;font-size:12px}
-.schedule-error{padding:9px 10px;margin:0 0 14px;border-radius:7px;color:#818181;background:#fbf6ee;font-size:11px;line-height:1.8;overflow-wrap:anywhere}
+.schedule-point{
+ position:absolute;left:-4.5px;top:12px;width:7px;height:7px;border-radius:50%;
+ border:1.5px solid #c8795c;background:#fff;
+ box-shadow:0 0 0 2.5px #f8f7f4;
+}
+.schedule-event.status-unverified .schedule-point,
+.schedule-event.status-conflicted .schedule-point{border-color:#c08946}
+.schedule-event-content{
+ flex:1;min-width:0;
+ background:#fff;border:1px solid #e8e4dc;border-radius:10px;
+ padding:9px 11px;box-shadow:0 1px 2px rgba(28,24,18,.03);
+}
+.schedule-event-time{
+ color:#c8795c;font-size:11px;font-weight:550;
+ margin:0 0 3px;line-height:1.45;font-variant-numeric:tabular-nums;
+}
+.schedule-event-title{
+ font-size:12.5px;color:#262420;font-weight:480;
+ line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap;margin:0;
+}
+.schedule-event-condition{
+ color:#7c766d;font-size:11px;line-height:1.55;
+ margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+.schedule-event-status{
+ display:inline-block;margin-top:6px;padding:1px 7px;border-radius:999px;
+ font-size:10px;font-weight:500;line-height:1.55;
+ background:#fcf5ea;color:#9a6734;border:1px solid #ecdbc0;
+}
+.schedule-event-status.conflicted{background:#fdf1ef;color:#b94a39;border-color:#f0d2cc}
+.schedule-empty{
+ padding:28px 12px 24px;text-align:center;color:#7c766d;
+ border:1px dashed #e2ded6;border-radius:13px;background:rgba(255,255,255,.55);
+}
+.schedule-empty-icon{
+ width:42px;height:42px;border-radius:12px;margin:0 auto 12px;
+ display:grid;place-items:center;
+ background:#fff;border:1px solid #e6e2da;color:#c8795c;
+ box-shadow:0 2px 6px rgba(32,27,21,.04);
+}
+.schedule-empty p{font-size:11.5px;line-height:1.65;margin:0;color:#858077}
+.schedule-loading{display:flex;align-items:center;justify-content:center;gap:8px;min-height:110px;color:#9d978d;font-size:12px}
+.schedule-error{
+ padding:9px 11px;margin:0 0 12px;border-radius:9px;
+ color:#b04c3b;background:#fdf1ef;border:1px solid #f0d2cc;
+ font-size:11.5px;line-height:1.6;overflow-wrap:anywhere;
+}
 @media(prefers-reduced-motion:reduce){.course-schedule *{scroll-behavior:auto!important;transition:none!important}}
-.course-context-panel .course-schedule button:focus-visible{outline:2px solid #b0aaa0;outline-offset:3px}
+.course-context-panel .course-schedule button:focus-visible{outline:2px solid #d7a690;outline-offset:2px}

@@ -4,16 +4,20 @@
 .teaching-canvas-toolbar>strong{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:500;line-height:20px;color:#625c55}
 .teaching-canvas-actions{display:flex;align-items:center;gap:3px;flex:none}
 .teaching-canvas-actions>button{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:0;border-radius:5px;background:transparent;box-shadow:none;color:#928a81;font:inherit;font-size:11px;line-height:20px;padding:4px;cursor:pointer}
-.teaching-canvas-actions>.teaching-canvas-save{padding-inline:5px;margin-right:4px;white-space:nowrap}
+.teaching-canvas-actions>.teaching-canvas-save,.teaching-canvas-actions>.teaching-canvas-reader-btn{padding-inline:6px;white-space:nowrap}
+.teaching-canvas-actions>.teaching-canvas-reader-btn{color:#7c6352}
+.teaching-canvas-actions>.teaching-canvas-reader-btn:hover:not(:disabled){background:#f8efe8;color:#9f4f33}
 .teaching-canvas-actions>button:hover:not(:disabled){background:#f5f2ed;color:#5e5750}
-.teaching-canvas-actions>button:focus-visible,.teaching-canvas-status>button:focus-visible{outline:2px solid #b39e88;outline-offset:2px}
+.teaching-canvas-actions>button:focus-visible,.teaching-canvas-status button:focus-visible{outline:2px solid #b39e88;outline-offset:2px}
 .teaching-canvas-actions>button:disabled{cursor:default;color:#a59e95}
 .teaching-canvas-stage{position:relative;height:var(--teaching-canvas-height,420px);max-height:72dvh;min-height:240px;background:#fff}
 .teaching-canvas-stage>iframe{display:block;width:100%;height:100%;border:0;background:#fff}
 .teaching-canvas-status{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;background:#fff;color:#969087;font-size:12px;line-height:1.7}
 .teaching-canvas-runtime-error{flex-direction:column;gap:10px;color:#9c7860;padding:20px;text-align:center}
 .teaching-canvas-runtime-error>p{margin:0!important;font-size:12px!important}
-.teaching-canvas-status>button{border:1px solid #e6ded4;border-radius:6px;background:#faf8f4;padding:6px 12px;color:#877669;font:inherit;font-size:12px;cursor:pointer}
+.teaching-canvas-error-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}
+.teaching-canvas-status button{border:1px solid #e6ded4;border-radius:6px;background:#faf8f4;padding:6px 12px;color:#877669;font:inherit;font-size:12px;cursor:pointer}
+.teaching-canvas-status button:hover{background:#f2ece3;color:#5d4d42}
 .teaching-canvas-save-error{padding:8px 14px;margin:0!important;border-top:1px solid #f0e9e0;background:#fffaf5;font-size:11px!important;line-height:1.7!important;color:#a47e60}
 .teaching-canvas-backdrop{position:fixed;inset:0;z-index:100;background:#30292338}
 .teaching-canvas-shell.is-expanded{position:fixed;inset:4vh max(24px,calc((100vw - 1180px)/2));z-index:101;display:flex;flex-direction:column;max-width:none;box-shadow:0 14px 65px #2d251e26}

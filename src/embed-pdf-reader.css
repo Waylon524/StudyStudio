@@ -1,0 +1,25 @@
+.embed-pdf-reader{container-type:inline-size;position:relative;display:flex;flex-direction:column;height:100%;min-width:0;min-height:0;overflow:hidden;background:#fff;color:#282725}
+.embed-pdf-reader-header{display:flex;align-items:center;gap:6px;min-height:58px;flex:0 0 58px;padding:0 12px;border-bottom:1px solid #e7e5e2;background:#fff}
+.embed-pdf-reader-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600}
+.embed-pdf-reader-icon{display:inline-flex;align-items:center;justify-content:center;flex:none;width:30px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:#66635e;cursor:pointer}
+.embed-pdf-reader-icon:hover:not(:disabled){background:#f1efec}.embed-pdf-reader-icon:disabled{opacity:.35;cursor:default}
+.embed-pdf-reader-ask{flex:none;border:1px solid #ded9d1;background:#faf8f4;border-radius:6px;padding:6px 8px;font:inherit;font-size:12px;color:#72503e;white-space:nowrap;cursor:pointer}
+.embed-pdf-reader button:focus-visible{outline:2px solid #a86d53;outline-offset:2px}
+.embed-pdf-reader-viewer{position:relative;flex:1;min-height:0;min-width:0;display:flex;overflow:hidden}
+.study-embed-viewer{display:block;flex:1;width:100%;height:100%;min-width:0;min-height:0;--epdf-accent:#9a634c;--epdf-font-family:system-ui,-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}
+.embed-pdf-reader-error{display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:#fff8ef;color:#9a553f;font-size:12px}
+.embed-pdf-reader-error button{border:1px solid #d9c6b8;border-radius:5px;background:#fff;padding:4px 7px;color:inherit;font:inherit;cursor:pointer}
+@media(max-width:600px){.embed-pdf-reader-header{min-height:54px;flex-basis:54px;padding-inline:8px}.embed-pdf-reader-title{font-size:13px}.embed-pdf-reader-ask{font-size:11px}}
+.embed-pdf-reader-header{position:relative;gap:5px}
+.embed-pdf-reader-ask{display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.embed-pdf-reader-pages{display:flex;align-items:center;gap:2px;flex:none;margin:0;font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;color:#716b64}
+.embed-pdf-reader-pages input{box-sizing:content-box;min-width:2.5ch;height:27px;padding:0 4px;border:1px solid #dedbd5;border-radius:5px;background:#fff;color:#47443f;font:inherit;text-align:center}
+.embed-pdf-reader-page-count{padding-inline:2px;font-size:12px}
+.embed-pdf-reader-download{position:relative;flex:none}
+.embed-pdf-reader-download-menu{position:absolute;z-index:70;top:calc(100% + 8px);right:0;display:flex;flex-direction:column;min-width:174px;padding:4px;border:1px solid #e2ded7;border-radius:8px;box-shadow:0 7px 25px #21180f24;background:#fff}
+.embed-pdf-reader-download-menu>a,.embed-pdf-reader-download-menu>button{display:block;width:100%;border:0;border-radius:5px;padding:8px 10px;background:transparent;color:#453c34;font:inherit;font-size:12px;text-decoration:none;text-align:left;white-space:nowrap;cursor:pointer}
+.embed-pdf-reader-download-menu>a:hover,.embed-pdf-reader-download-menu>button:hover:not(:disabled){background:#f3efea}.embed-pdf-reader-download-menu>button:disabled{color:#a39a91;cursor:default}
+.embed-pdf-reader-export-spinner{animation:embed-pdf-export-spin .8s linear infinite}
+@keyframes embed-pdf-export-spin{to{transform:rotate(360deg)}}
+@container(max-width:550px){.embed-pdf-reader-ask{width:30px;height:32px;padding:0;border:0;background:transparent}.embed-pdf-reader-ask>span{display:none}.embed-pdf-reader-header{gap:2px;padding-inline:7px}.embed-pdf-reader-pages .embed-pdf-reader-icon{width:25px}.embed-pdf-reader-page-count{font-size:11px}.embed-pdf-reader-pages input{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.embed-pdf-reader-export-spinner{animation:none}}

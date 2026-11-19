@@ -1,0 +1,45 @@
+.pdf-markup{flex:0 0 auto;min-width:0;color:#625d55}
+.pdf-markup-toolbar,.pdf-markup-inline-tools{display:flex;align-items:center;gap:1px}
+.pdf-markup-toolbar{padding:0 8px;border-inline:1px solid #e8e4dd}
+.pdf-markup-tool{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:29px;height:29px;padding:0;border:0;border-radius:5px;background:transparent;color:#6f695f}
+.pdf-markup-tool:hover:not(:disabled){background:#f2efea}.pdf-markup-tool[aria-pressed=true]{background:#eee7dd;color:#9b5339}
+.pdf-markup-tool:focus-visible,.pdf-markup select:focus-visible,.pdf-markup input:focus-visible,.pdf-markup-text-editor:focus-visible{outline:2px solid #c36b4e;outline-offset:1px}
+.pdf-markup-menu-trigger{display:none}
+.pdf-markup-tool-popover,.pdf-markup-inspector{position:absolute;right:8px;bottom:calc(100% + 8px);z-index:6;box-sizing:border-box;padding:8px;border:1px solid #e1dbd1;border-radius:9px;background:#fff;box-shadow:0 5px 20px #3e332019}
+.pdf-markup-tool-popover{display:none;align-items:center;gap:3px}
+.pdf-markup-inspector{width:min(360px,calc(100% - 16px));max-width:var(--pdf-markup-inspector-max-width,calc(100% - 16px));max-height:min(260px,45vh,var(--pdf-markup-inspector-max-height,260px));overflow:auto}
+.pdf-markup-parameters{display:flex;align-items:center;gap:8px;min-height:29px}
+.pdf-markup-parameters select{height:27px;max-width:75px;border:1px solid #e2ddd5;border-radius:5px;background:#fff;padding:1px 4px;color:#6f695f;font-size:11px}
+.pdf-markup-number{display:flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap}
+.pdf-markup-number input{width:42px;height:27px;padding:1px 3px;text-align:center;border:1px solid #e2ddd5;border-radius:5px;background:#fff;color:#615b52;font-size:11px}
+.pdf-markup-delete{margin-left:auto;color:#947564}
+.pdf-markup-text-editor{display:block;width:100%;margin:7px 0 0;max-height:120px;resize:vertical;padding:6px 8px;border:1px solid #ded8ce;border-radius:6px;background:#fff;color:#443e35;font-size:12px;line-height:1.5;user-select:text;-webkit-user-select:text}
+.pdf-markup-error{display:flex;align-items:flex-start;justify-content:space-between;gap:7px;padding-top:6px;font-size:11px;line-height:1.4;color:#a26041}.pdf-markup-error button{flex-shrink:0;border:0;background:none;padding:0;color:inherit;font-size:inherit;text-decoration:underline}
+@container(max-width:649px){.pdf-markup-inline-tools{display:none}.pdf-markup-menu-trigger{display:inline-flex}.pdf-markup-toolbar{padding-inline:3px}.pdf-markup-tool-popover{display:flex}}
+.pdf-markup-layer{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;user-select:none;-webkit-user-select:none;touch-action:none;z-index:2}
+.pdf-markup-layer.is-drawing{pointer-events:auto;cursor:crosshair}
+.pdf-markup-item{cursor:move;pointer-events:visiblePainted;outline:none}
+.pdf-markup-item text{white-space:pre;pointer-events:all;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC",sans-serif;paint-order:stroke fill}
+.pdf-markup-text-hit{pointer-events:all}
+.pdf-markup-item.is-selected text{stroke:#c8ab91;stroke-width:.25}
+.pdf-markup-item.is-selected>line,.pdf-markup-item.is-selected>rect:not(.pdf-markup-text-hit),.pdf-markup-item.is-selected>ellipse{filter:drop-shadow(0 0 1px #ad8d72)}
+.pdf-markup-item.is-selected .pdf-markup-text-hit{stroke:#b48a68;stroke-width:1;stroke-dasharray:4 3}
+.pdf-markup-item:focus-visible{filter:drop-shadow(0 0 2px #a6744c)}
+.pdf-region-selection,.pdf-region-draft{fill:#6795ba15;stroke:#5687ad;stroke-width:1.5;stroke-dasharray:6 4;pointer-events:none}
+.pdf-region-draft{fill:#6795ba22;stroke-dasharray:4 3}
+.pdf-markup-layer.is-drawing .pdf-markup-item,.pdf-markup-layer.is-drawing .pdf-markup-item *{pointer-events:none!important}
+
+.pdf-markup-inspector.is-anchored{right:auto;bottom:auto;top:0;left:0;width:max-content;max-width:var(--pdf-markup-inspector-max-width,calc(100% - 16px));visibility:hidden;padding:6px}
+.pdf-markup-inspector.is-anchored .pdf-markup-parameters{gap:6px;min-height:27px}
+.pdf-markup-text-surface{position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:none;z-index:3}
+.pdf-markup-note{position:absolute;display:grid;min-width:0;pointer-events:auto;line-height:1.25;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC",sans-serif;font-weight:400;font-style:normal;letter-spacing:normal;word-spacing:normal;text-align:left;outline:none}
+.pdf-markup-note-box{position:relative;display:grid;min-width:2ch;max-width:100%;padding:2px 3px;box-sizing:border-box;line-height:inherit;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal}
+.pdf-markup-note-mirror{grid-area:1/1;display:block;min-width:0;line-height:inherit;white-space:inherit;overflow-wrap:inherit;word-break:inherit;user-select:none;-webkit-user-select:none}
+.pdf-markup-note-box.is-editing .pdf-markup-note-mirror{visibility:hidden}
+.pdf-markup-note.is-selected .pdf-markup-note-box,.pdf-markup-note:focus-visible .pdf-markup-note-box{outline:1px solid #b48a68}
+.pdf-markup-inline-editor{position:absolute;inset:0;display:block;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;resize:none;margin:0;padding:2px 3px;border:0;border-radius:0;background:transparent;color:inherit;-webkit-text-fill-color:currentColor;font:inherit;line-height:inherit;letter-spacing:inherit;word-spacing:inherit;white-space:pre-wrap;overflow-wrap:anywhere;word-break:normal;overflow:hidden;user-select:text;-webkit-user-select:text;caret-color:currentColor}
+.pdf-markup-note-box .pdf-markup-inline-editor:focus-visible{outline:none}
+.pdf-markup-inline-editor::placeholder{color:#888;-webkit-text-fill-color:#888;opacity:1}
+.pdf-markup-note-move{position:absolute;left:-7px;top:-15px;display:grid;place-items:center;width:20px;height:15px;padding:0;border:1px solid #cbb89f;border-radius:3px;background:#fffdf7;color:#8b745a;cursor:move;touch-action:none}
+.pdf-markup-note-move:focus-visible{outline:2px solid #c36b4e}
+.pdf-markup-text-surface.is-drawing,.pdf-markup-text-surface.is-drawing *{pointer-events:none!important}

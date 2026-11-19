@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { validateStudySpec, gradeAnswer } from '../shared/study-schema.mjs';
 import { validateCanvasSpec } from '../shared/canvas-schema.mjs';
 import { pdfInfo } from './pdf-reader.mjs';
+import {validateCoursewareUpload} from './upload-policy.mjs';
 import {prepareAnswerImage,MAX_ANSWER_IMAGE_BYTES,MAX_ANSWER_IMAGES,ANSWER_IMAGE_ID} from './answer-images.mjs';
 
 const exec = promisify(execFile);
@@ -18,8 +19,11 @@ const digest = value => createHash('sha256').update(JSON.stringify(value)).diges
 const blank = () => ({version:1, courseId:null, sets:[], items:[], attempts:[], attachments:[], turns:[], readingPositions:{}, canvases:[]});
 const memoryStart='<!-- STUDY-STUDIO MEMORY START -->', memoryEnd='<!-- STUDY-STUDIO MEMORY END -->';
 const internalFiles=new Set(['AGENTS.md','学习进度.md','课程重要信息.md']);
-const nativeTextExtensions=new Set(['.txt','.md','.csv','.json','.tex','.tsv']);
-const mimeTypes={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.json':'application/json','.tex':'text/plain','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif'};
+const internalFilesLower=new Set([...internalFiles].map(name=>name.toLowerCase()));
+const nativeTextExtensions=new Set(['.txt','.md','.markdown','.html','.htm','.csv','.json','.tex','.tsv']);
+const agentWritableExtensions=new Set(['.md','.markdown','.html','.htm','.txt','.csv','.tsv','.json','.tex']);
+const MAX_AGENT_FILE_BYTES=500*1024;
+const mimeTypes={'.pdf':'application/pdf','.txt':'text/plain','.md':'text/markdown','.markdown':'text/markdown','.html':'text/html','.htm':'text/html','.csv':'text/csv','.tsv':'text/tab-separated-values','.json':'application/json','.tex':'text/plain','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif'};
 const renderMemory=m=>{const escape=x=>x.replace(/[\r\n]+/g,' ').replace(/<!--/g,'&lt;!--');return [memoryStart,'## 已记录的课程偏好与约定','',...['preferences','courseRules'].flatMap(k=>[`### ${k==='preferences'?'学习偏好':'课程规则'}`,...m[k].map(x=>`- ${escape(x.text)}（依据：${escape(x.source)}；${escape(x.evidence)}；ID：${x.id}）`),'']),memoryEnd].join('\n');};
 const decorated = (s, item) => { const attempts=s.attempts.filter(a=>a.questionId===item.id); return {...item,attempts,latestAttempt:attempts.at(-1) || null,reveals:s.turns.filter(e=>e.kind==='reveal' && e.questionId===item.id)}; };
 const brief = value => String(value ?? '').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').slice(0,120);
@@ -222,15 +226,90 @@ export class LearningStore {
         if(entry.isDirectory()){
           if(depth<5&&folders.length<500){await this.safePath(course,relativePath);folders.push({path:relativePath,name:entry.name,kind:relativePath.split('/').some(segment=>segment==='课件'||segment.toLowerCase()==='courseware')?'courseware':'material'});}
           if(depth<5&&files.length<500)await walk(relativePath,depth+1);
-        }else if(entry.isFile()&&files.length<500){const stat=await fs.stat(await this.safePath(course,relativePath));if(stat.isFile())files.push({relativePath,name:entry.name,size:stat.size,identity:`${stat.dev}:${stat.ino}`});}
+        }else if(entry.isFile()&&files.length<500){const stat=await fs.stat(await this.safePath(course,relativePath));if(stat.isFile())files.push({relativePath,name:entry.name,size:stat.size,modifiedAt:stat.mtime.toISOString(),identity:`${stat.dev}:${stat.ino}`});}
       }
     };
     await walk('',0);return {files,folders};
   }
+  async courseStats(course,{readonly=false}={}) {
+    const workspacePath=this.coursePath(course);
+    let files;
+    if(readonly){
+      try{const st=await fs.lstat(workspacePath);if(st.isSymbolicLink()||!st.isDirectory())return {coursewareCount:0,materialCount:0,fileCount:0,totalBytes:0,workspacePath};}catch(e){if(e.code==='ENOENT')return {coursewareCount:0,materialCount:0,fileCount:0,totalBytes:0,workspacePath};throw e;}
+      files=[];
+      const walk=async(relative,depth)=>{
+        const dir=await this.safePath(course,relative);
+        for(const entry of await fs.readdir(dir,{withFileTypes:true})){
+          if(entry.name.startsWith('.')||entry.isSymbolicLink())continue;
+          const relativePath=relative?`${relative}/${entry.name}`:entry.name;
+          if(entry.isDirectory()){if(depth<5&&files.length<500)await walk(relativePath,depth+1);}
+          else if(entry.isFile()&&files.length<500){const stat=await fs.stat(await this.safePath(course,relativePath));if(stat.isFile())files.push({relativePath,name:entry.name,size:stat.size});}
+        }
+      };
+      await walk('',0);
+    }else{
+      files=(await this.scanWorkspace(course)).files;
+    }
+    let coursewareCount=0,materialCount=0,totalBytes=0;
+    for(const file of files){
+      if(internalFiles.has(file.relativePath))continue;
+      const folder=path.dirname(file.relativePath)==='.'?'':path.dirname(file.relativePath);
+      const ext=path.extname(file.name).toLowerCase();
+      const inCourseware=folder.split('/').some(x=>x==='课件'||x.toLowerCase()==='courseware');
+      if(inCourseware&&ext==='.pdf')coursewareCount++;else materialCount++;
+      totalBytes+=file.size||0;
+    }
+    return {coursewareCount,materialCount,fileCount:coursewareCount+materialCount,totalBytes,workspacePath};
+  }
   async listFiles(course) { return (await this.scanWorkspace(course)).files; }
+  _validateFolderPath(folder) {
+    if(typeof folder!=='string'||!folder||path.isAbsolute(folder)||folder.includes('\\')||folder.split('/').some(x=>!x||x==='.'||x==='..'||x.startsWith('.')||/[\x00-\x1f]/.test(x))||folder.length>500) throw Object.assign(Error('文件夹路径无效。'),{status:400});
+    return folder;
+  }
   async makeFolder(course,folder) {
-    if(typeof folder!=='string'||path.isAbsolute(folder)||folder.includes('\\')||folder.split('/').some(x=>!x||x==='.'||x==='..'||x.startsWith('.')||/[\x00-\x1f]/.test(x))||folder.length>500) throw Error('文件夹路径无效。');
+    this._validateFolderPath(folder);
     await this.initCourse(course); let current=''; for(const part of folder.split('/')) {current=current?`${current}/${part}`:part; const target=await this.safePath(course,current); try{await fs.mkdir(target)}catch(e){if(e.code!=='EEXIST')throw e;if(!(await fs.lstat(target)).isDirectory())throw Error('文件夹路径被文件占用。');}} return folder;
+  }
+  async renameFolder(course,{path:oldPath,newPath}) {
+    this._validateFolderPath(oldPath);this._validateFolderPath(newPath);
+    if(oldPath===newPath)return {path:newPath,folders:await this.listFolders(course)};
+    if(newPath.startsWith(`${oldPath}/`))throw Object.assign(Error('不能将分类移动到自身目录内。'),{status:400});
+    await this.initCourse(course);
+    const from=await this.safePath(course,oldPath);
+    let fromStat;try{fromStat=await fs.lstat(from)}catch(e){if(e.code==='ENOENT')throw Object.assign(Error('分类不存在。'),{status:404});throw e;}
+    if(fromStat.isSymbolicLink()||!fromStat.isDirectory())throw Object.assign(Error('无效的分类目录。'),{status:400});
+    const parent=path.posix.dirname(newPath);
+    if(parent&&parent!=='.')await this.makeFolder(course,parent);
+    const target=await this.safePath(course,newPath);
+    let caseOnly=false;
+    try{
+      const targetStat=await fs.lstat(target);
+      if(targetStat.dev===fromStat.dev&&targetStat.ino===fromStat.ino)caseOnly=true;
+      else throw Object.assign(Error('目标分类名称已存在。'),{status:409});
+    }catch(e){if(e.code!=='ENOENT')throw e;}
+    if(!caseOnly)await this.safePath(course,newPath);
+    await fs.rename(from,target);
+    const prefix=`${oldPath}/`,replacement=`${newPath}/`;
+    const rewrite=value=>typeof value==='string'&&value.startsWith(prefix)?replacement+value.slice(prefix.length):value;
+    await this._mutate(course,s=>{
+      for(const record of s.sourceIndex||[])record.relativePath=rewrite(record.relativePath);
+      for(const attachment of s.attachments||[])attachment.relativePath=rewrite(attachment.relativePath);
+      for(const confirmation of Object.values(s.importConfirmations||{}))if(confirmation)confirmation.relativePath=rewrite(confirmation.relativePath);
+    });
+    return {path:newPath,folders:await this.listFolders(course)};
+  }
+  async deleteFolder(course,folderPath) {
+    this._validateFolderPath(folderPath);
+    await this.initCourse(course);
+    const dir=await this.safePath(course,folderPath);
+    let stat;try{stat=await fs.lstat(dir)}catch(e){if(e.code==='ENOENT')throw Object.assign(Error('分类不存在。'),{status:404});throw e;}
+    if(stat.isSymbolicLink()||!stat.isDirectory())throw Object.assign(Error('无效的分类目录。'),{status:400});
+    const entries=await fs.readdir(dir,{withFileTypes:true});
+    const realEntries=entries.filter(entry=>entry.name!=='.DS_Store');
+    if(realEntries.length)throw Object.assign(Error('该分类下仍有文件或子分类，请先移出或删除后再删除分类。'),{status:409});
+    if(entries.some(entry=>entry.name==='.DS_Store'))await fs.unlink(path.join(dir,'.DS_Store')).catch(()=>{});
+    await fs.rmdir(dir);
+    return {deleted:true,path:folderPath,folders:await this.listFolders(course)};
   }
   async listFolders(course) { return (await this.scanWorkspace(course)).folders; }
   async listSources(course) {
@@ -247,14 +326,14 @@ export class LearningStore {
         used.add(record.id);if(record.relativePath!==f.relativePath||record.identity!==f.identity)changed=true;record.relativePath=f.relativePath;record.identity=f.identity;
         const attachment=record.attachmentId&&s.attachments.find(a=>a.id===record.attachmentId);if(attachment&&attachment.relativePath!==f.relativePath){attachment.relativePath=f.relativePath;changed=true;}
         const folder=path.dirname(f.relativePath)==='.'?'':path.dirname(f.relativePath);const ext=path.extname(f.name).toLowerCase(),kind=folder.split('/').some(x=>x==='课件'||x.toLowerCase()==='courseware')||['.ppt','.pptx'].includes(ext)?'courseware':'material';
-        result.push({id:record.id,name:f.name,originalName:attachment?.name||f.name,relativePath:f.relativePath,path:f.relativePath,folder,category:folder,kind,mime:ext==='.pdf'?'application/pdf':attachment?.mime||mimeTypes[ext]||'application/octet-stream',attachmentId:attachment?.id||null,url:`/api/courses/${encodeURIComponent(course.id)}/sources/${record.id}/file`,size:f.size,selected:selection[record.id]!==false});
+        result.push({id:record.id,name:f.name,originalName:attachment?.name||f.name,relativePath:f.relativePath,path:f.relativePath,folder,category:folder,kind,mime:ext==='.pdf'?'application/pdf':attachment?.mime||mimeTypes[ext]||'application/octet-stream',attachmentId:attachment?.id||null,url:`/api/courses/${encodeURIComponent(course.id)}/sources/${record.id}/file`,size:f.size,modifiedAt:f.modifiedAt||null,uploadedAt:attachment?.createdAt||null,selected:selection[record.id]!==false});
       }return result;
     },{shouldSave:()=>changed,ensureTemplates:false});
   }
   async sourceForPath(course,relativePath) {
     if(typeof relativePath!=='string'||!relativePath||relativePath.split(/[\\/]/).some(x=>x.startsWith('.')))throw Error('资料路径无效。');
     const file=await this.safePath(course,relativePath),st=await fs.stat(file);if(!st.isFile())throw Error('资料不是文件。');
-    return (await this.indexSources(course,[{relativePath,name:path.basename(relativePath),size:st.size,identity:`${st.dev}:${st.ino}`}]))[0];
+    return (await this.indexSources(course,[{relativePath,name:path.basename(relativePath),size:st.size,modifiedAt:st.mtime.toISOString(),identity:`${st.dev}:${st.ino}`}]))[0];
   }
   async sourceById(course,id) {const s=await this._load(course);const record=s.sourceIndex?.find(x=>x.id===id);if(!record)return null;try{const source=await this.sourceForPath(course,record.relativePath);return source.id===id?source:null}catch(e){if(e.code==='ENOENT')return null;throw e}}
   async listWorkspace(course,{path:relative='',offset=0,limit=100}={}) {
@@ -351,26 +430,105 @@ export class LearningStore {
       return {relativePath,kind:'text',text:characters.slice(0,limit).join(''),truncated,warning:truncated?`提取文字超过 ${limit} 字符，已截断。`:null};
     }finally{await handle.close();}
   }
-  async readFile(course,relativePath) {
+  async readFile(course,relativePath,{limit=100000}={}) {
     await this._load(course); const target=await this.safePath(course,relativePath); const st=await fs.stat(target);
     if (!st.isFile() || st.size>MAX_MATERIAL_BYTES) throw Error('文件不存在或超过 '+MATERIAL_SIZE_LABEL+'。');
     const ext=path.extname(target).toLowerCase();
     if (['.png','.jpg','.jpeg','.webp','.gif'].includes(ext)) return {relativePath,kind:'image',absolutePath:target,text:'',warning:null};
-    if(nativeTextExtensions.has(ext))return this._nativeText(course,relativePath);
+    const safeLimit=Number.isInteger(limit)?Math.max(1000,Math.min(500000,limit)):100000;
+    if(nativeTextExtensions.has(ext))return this._nativeText(course,relativePath,safeLimit);
     const python=process.env.STUDY_EXTRACT_PYTHON || '/usr/bin/python3';
     try { const {stdout}=await exec(python,['-B',extractor,target],{timeout:15000,maxBuffer:600000}); const result=JSON.parse(stdout); return {relativePath,kind:'text',...result}; } catch { return {relativePath,kind:'text',text:'',warning:'文本提取不可用；原文件仍然保留。'}; }
   }
-  async upload(course,{name,mime,data,folder='附件'}) {
-    if (!Buffer.isBuffer(data) || data.length>MAX_MATERIAL_BYTES || !data.length || typeof name !== 'string' || !name || name.startsWith('.') || name.length>240 || /[\/\\\x00-\x1f]/.test(name)) throw Error('附件无效或超过 '+MATERIAL_SIZE_LABEL+'。');
+  async writeWorkspaceFile(course,{path:inputPath,content,overwrite=false}) {
+    if(typeof inputPath!=='string'||!inputPath.trim()||inputPath.length>400||inputPath.includes('\0')||inputPath.includes('\\')||/[\x00-\x1f]/.test(inputPath))throw Object.assign(Error('文件路径无效。'),{status:400});
+    const raw=inputPath.trim();
+    if(raw.startsWith('/')||raw.endsWith('/'))throw Object.assign(Error('请提供课程内的相对文件路径，不要以斜杠开头或结尾。'),{status:400});
+    const segments=raw.split('/');
+    if(segments.length>6)throw Object.assign(Error('目录层级过深，最多支持 5 层子目录。'),{status:400});
+    for(const seg of segments){
+      if(!seg||seg==='.'||seg==='..'||seg.startsWith('.')||seg.length>200||/[\/\\\x00-\x1f]/.test(seg)||seg!==seg.trim())throw Object.assign(Error('路径包含无效的文件名或隐藏目录。'),{status:400});
+    }
+    const folderSegments=segments.slice(0,-1),filename=segments[segments.length-1];
+    if(folderSegments.some(s=>s==='课件'||s.toLowerCase()==='courseware'))throw Object.assign(Error('「课件」目录仅用于存放 PDF 课件，请将生成的文档保存到「笔记」「互动页面」等资料目录。'),{status:400});
+    if(folderSegments[0]==='待整理')throw Object.assign(Error('请直接将文件保存到合适的资料目录（如「笔记/」「互动页面/」），不要写入「待整理/」。'),{status:400});
+    if(segments.length===1&&internalFilesLower.has(filename.toLowerCase()))throw Object.assign(Error('系统保留文件不可直接写入，请使用其他文件名。'),{status:400});
+    const ext=path.extname(filename).toLowerCase();
+    if(!ext||!agentWritableExtensions.has(ext))throw Object.assign(Error('仅支持创建 .md、.html、.txt、.csv、.tsv、.json、.tex 格式的学习资料文件。'),{status:400});
+    if(typeof content!=='string'||!content.trim())throw Object.assign(Error('文件内容不能为空。'),{status:400});
+    if(typeof overwrite!=='boolean')throw Object.assign(Error('overwrite 参数必须为布尔值。'),{status:400});
+    const bytes=Buffer.from(content,'utf8');
+    if(bytes.length>MAX_AGENT_FILE_BYTES)throw Object.assign(Error('文件内容超过 500 KB 上限，请精简后再保存。'),{status:400});
+    const relativePath=segments.join('/'),folder=folderSegments.join('/');
+    if(folder)await this.makeFolder(course,folder);else await this.initCourse(course);
+    const {action,recordId}=await this._mutate(course,async s=>{
+      s.sourceIndex ||= [];s.agentFiles ||= {};
+      const target=await this.safePath(course,relativePath);
+      let existingStat=null;
+      try{existingStat=await fs.lstat(target)}catch(e){if(e.code!=='ENOENT')throw e;}
+      if(!existingStat){
+        await fs.writeFile(target,bytes,{flag:'wx',mode:0o600});
+        const stat=await fs.stat(target),identity=`${stat.dev}:${stat.ino}`;
+        let id=digest([course.id,'source',relativePath]);
+        if(s.sourceIndex.some(x=>x.id===id))id=digest([course.id,'source',randomUUID()]);
+        const record={id,relativePath,identity,attachmentId:null};
+        s.sourceIndex.push(record);
+        const ts=now();
+        s.agentFiles[id]={createdAt:ts,updatedAt:ts};
+        return {action:'created',recordId:id};
+      }
+      if(existingStat.isSymbolicLink()||!existingStat.isFile())throw Object.assign(Error('目标路径不是可写入的普通文件。'),{status:400});
+      if(!overwrite)throw Object.assign(Error(`文件「${relativePath}」已存在。请使用新的文件名，或如确认要更新你之前创建的文档，请设置 overwrite: true。`),{status:409});
+      const existingIdentity=`${existingStat.dev}:${existingStat.ino}`;
+      const record=s.sourceIndex.find(x=>x.relativePath===relativePath)||s.sourceIndex.find(x=>x.identity===existingIdentity);
+      const isUserAttachment=!!record?.attachmentId||(s.attachments||[]).some(a=>a.relativePath===relativePath);
+      if(!record||!s.agentFiles[record.id]||isUserAttachment)throw Object.assign(Error(`「${relativePath}」是课程原有资料，为保护原件不能直接覆盖；请另存为新文件名（如放到「笔记/」或加上版本后缀）。`),{status:409});
+      const tmp=await this.safePath(course,`.study-studio/write-${randomUUID()}.tmp`);
+      try{
+        await fs.writeFile(tmp,bytes,{flag:'wx',mode:0o600});
+        await this.safePath(course,relativePath);
+        await fs.rename(tmp,target);
+      }finally{await fs.rm(tmp,{force:true});}
+      const nextStat=await fs.stat(target);
+      record.relativePath=relativePath;record.identity=`${nextStat.dev}:${nextStat.ino}`;
+      s.agentFiles[record.id]={...s.agentFiles[record.id],updatedAt:now()};
+      return {action:'updated',recordId:record.id};
+    });
+    const source=await this.sourceById(course,recordId);
+    if(!source)throw Error('文件已写入但索引读取失败。');
+    return {action,source,sourceId:source.id,name:source.name,relativePath:source.relativePath,folder:source.folder,size:source.size,mime:source.mime,citation:`[${source.name}](study-source:${source.id})`};
+  }
+  async upload(course,{name,mime,data,folder='附件',intent}) {
+    if (!Buffer.isBuffer(data) || data.length>MAX_MATERIAL_BYTES || (!data.length&&intent!=='courseware') || typeof name !== 'string' || !name || name.startsWith('.') || name.length>240 || /[\/\\\x00-\x1f]/.test(name)) throw Error('附件无效或超过 '+MATERIAL_SIZE_LABEL+'。');
+    if(intent==='courseware'){
+      validateCoursewareUpload({name,data});
+      folder='课件';mime='application/pdf';
+    }
     if(folder)await this.makeFolder(course,folder);else await this.initCourse(course);
     return this._mutate(course,async s=>{ const id=randomUUID(),ext=path.extname(name),stem=name.slice(0,name.length-ext.length);let relativePath,dest;for(let n=0;n<10000;n++){const filename=n?`${stem} (${n})${ext}`:name;relativePath=folder?`${folder}/${filename}`:filename;if(internalFiles.has(relativePath))continue;dest=await this.safePath(course,relativePath);try{await fs.writeFile(dest,data,{flag:'wx',mode:0o600});break}catch(e){if(e.code!=='EEXIST'||n===9999)throw e;}}if(!dest)throw Error('无法保存附件。');const info={id,name,mime:typeof mime==='string'?mime.slice(0,200):'application/octet-stream',relativePath,size:data.length,createdAt:now()};s.attachments.push(info);return info; });
   }
   async attachment(course,id) { await this.listSources(course); const s=await this._load(course); const info=s.attachments.find(x=>x.id===id); if (!info) throw Error('未找到附件。'); return {...info,absolutePath:await this.safePath(course,info.relativePath)}; }
-  async moveSource(course,{sourceId,folder}) {
-    if(typeof folder!=='string')throw Error('目标文件夹无效。');if(folder)await this.makeFolder(course,folder);
-    const source=await this.sourceById(course,sourceId);if(!source)throw Error('资料不存在。');
+  async _clearEmptyStagingParents(course,relativePath) {
+    let folder=path.posix.dirname(relativePath);
+    if(folder!=='待整理'&&!folder.startsWith('待整理/'))return;
+    while(folder==='待整理'||folder.startsWith('待整理/')){
+      try{await fs.rmdir(await this.safePath(course,folder));}
+      catch(error){if(['ENOTEMPTY','ENOENT','EEXIST'].includes(error.code))return;throw error;}
+      folder=path.posix.dirname(folder);
+    }
+  }
+  async moveSource(course,{sourceId,folder,requirePdf=false}) {
+    if(typeof folder!=='string')throw Object.assign(Error('目标文件夹无效。'),{status:400});
+    const source=await this.sourceById(course,sourceId);if(!source)throw Object.assign(Error('资料不存在。'),{status:404});
+    const from=await this.safePath(course,source.relativePath);
+    if(requirePdf){
+      const handle=await fs.open(from,constants.O_RDONLY|constants.O_NOFOLLOW);
+      try{const head=Buffer.alloc(9);const {bytesRead}=await handle.read(head,0,9,0);validateCoursewareUpload({name:source.name,data:head.subarray(0,bytesRead)});}
+      finally{await handle.close();}
+    }
+    if(folder)await this.makeFolder(course,folder);
     if(source.folder===folder)return source;
-    const from=await this.safePath(course,source.relativePath),filename=path.basename(source.relativePath),ext=path.extname(filename),stem=filename.slice(0,filename.length-ext.length);let target,movedPath;
+    const filename=path.basename(source.relativePath),ext=path.extname(filename),stem=filename.slice(0,filename.length-ext.length);let target,movedPath;
     for(let n=0;n<10000;n++){
       const name=n?`${stem} (${n})${ext}`:filename,relativePath=folder?`${folder}/${name}`:name;
       if(internalFiles.has(relativePath))continue;
@@ -379,8 +537,68 @@ export class LearningStore {
     }
     if(!target)throw Error('无法找到可用的资料名称。');
     try{await fs.unlink(from)}catch(e){await fs.unlink(target).catch(()=>{});throw e;}
-    await this._mutate(course,s=>{const record=s.sourceIndex.find(x=>x.id===sourceId);record.relativePath=movedPath;const attachment=record.attachmentId&&s.attachments.find(x=>x.id===record.attachmentId);if(attachment)attachment.relativePath=movedPath;});
+    await this._clearEmptyStagingParents(course,source.relativePath);
+    await this._mutate(course,s=>{const record=s.sourceIndex.find(x=>x.id===sourceId);if(record)record.relativePath=movedPath;const attachment=record?.attachmentId&&s.attachments.find(x=>x.id===record.attachmentId);if(attachment)attachment.relativePath=movedPath;});
     return this.sourceById(course,sourceId);
+  }
+  async renameSource(course,{sourceId,name}) {
+    const trimmed=typeof name==='string'?name.trim():'';
+    if(!trimmed||trimmed==='.'||trimmed==='..'||trimmed.startsWith('.')||trimmed.length>240||/[\/\\\x00-\x1f]/.test(trimmed))throw Object.assign(Error('文件名称无效，不能包含斜杠或以点开头。'),{status:400});
+    const source=await this.sourceById(course,sourceId);if(!source)throw Object.assign(Error('资料不存在。'),{status:404});
+    if(internalFiles.has(source.relativePath))throw Object.assign(Error('系统文件不可重命名。'),{status:400});
+    const relativePath=source.folder?`${source.folder}/${trimmed}`:trimmed;
+    if(internalFiles.has(relativePath))throw Object.assign(Error('不能使用系统保留文件名。'),{status:400});
+    if(source.kind==='courseware'&&path.extname(source.name).toLowerCase()==='.pdf'&&path.extname(trimmed).toLowerCase()!=='.pdf')throw Object.assign(Error('课件文件需要保留 .pdf 后缀。'),{status:400});
+    if(relativePath===source.relativePath)return source;
+    const from=await this.safePath(course,source.relativePath),target=await this.safePath(course,relativePath);
+    const fromStat=await fs.lstat(from);
+    if(fromStat.isSymbolicLink()||!fromStat.isFile())throw Object.assign(Error('无效的资料文件。'),{status:400});
+    try{
+      await fs.link(from,target);
+      try{await fs.unlink(from);}catch(e){await fs.unlink(target).catch(()=>{});throw e;}
+    }catch(e){
+      if(e.code!=='EEXIST')throw e;
+      const targetStat=await fs.lstat(target);
+      if(targetStat.dev===fromStat.dev&&targetStat.ino===fromStat.ino)await fs.rename(from,target);
+      else throw Object.assign(Error('同分类下已存在同名文件，请换一个名称。'),{status:409});
+    }
+    const nextStat=await fs.stat(target);
+    await this._mutate(course,s=>{
+      const record=(s.sourceIndex||[]).find(x=>x.id===sourceId);
+      if(record){record.relativePath=relativePath;record.identity=`${nextStat.dev}:${nextStat.ino}`;}
+      const attachment=record?.attachmentId&&s.attachments.find(x=>x.id===record.attachmentId);
+      if(attachment){
+        attachment.relativePath=relativePath;attachment.name=trimmed;
+        if(s.importConfirmations?.[attachment.id]){
+          s.importConfirmations[attachment.id]={...s.importConfirmations[attachment.id],relativePath,fileVersion:{size:nextStat.size,mtimeMs:nextStat.mtimeMs,ino:nextStat.ino}};
+        }
+      }
+    });
+    return this.sourceById(course,sourceId);
+  }
+  async deleteSource(course,sourceId) {
+    const source=await this.sourceById(course,sourceId);if(!source)throw Object.assign(Error('资料不存在。'),{status:404});
+    if(internalFiles.has(source.relativePath))throw Object.assign(Error('系统文件不可删除。'),{status:400});
+    const target=await this.safePath(course,source.relativePath);
+    const stat=await fs.lstat(target);
+    if(stat.isSymbolicLink()||!stat.isFile())throw Object.assign(Error('无效的资料文件。'),{status:400});
+    await fs.unlink(target);
+    await this._clearEmptyStagingParents(course,source.relativePath);
+    let attachmentId=source.attachmentId||null,closedReader=false;
+    await this._mutate(course,s=>{
+      const record=(s.sourceIndex||[]).find(x=>x.id===sourceId);
+      if(record?.attachmentId)attachmentId=record.attachmentId;
+      s.sourceIndex=(s.sourceIndex||[]).filter(x=>x.id!==sourceId);
+      if(s.agentFiles)delete s.agentFiles[sourceId];
+      if(s.sourceSelection)delete s.sourceSelection[sourceId];
+      if(s.reader?.sourceId===sourceId){s.reader=null;closedReader=true;}
+      if(s.readingPositions)delete s.readingPositions[sourceId];
+      if(attachmentId){
+        s.attachments=(s.attachments||[]).filter(a=>a.id!==attachmentId);
+        if(s.importConfirmations)delete s.importConfirmations[attachmentId];
+      }
+    });
+    return {deleted:true,sourceId,attachmentId,closedReader,relativePath:source.relativePath};
   }
   async listMemory(course) { const s=await this._load(course),memory=s.memory||{}; return ['preferences','courseRules'].flatMap(category=>(memory[category]||[]).map(entry=>({...entry,category}))); }
   async readInstructions(course,{state}={}) {

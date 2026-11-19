@@ -10,8 +10,8 @@ A local-first AI study workspace that brings course materials, persistent conver
 
 ### 功能
 
-- **按课程学习**：每门课保留持续会话、资料目录、阅读位置与学习约定；支持课程归档与恢复。
-- **结合资料讲解**：并排阅读 PDF、点击来源跳到对应页；Agent 按需读取文字、页面图像、图片和 EPUB 分节。打开 PDF 本身不会发送页面内容。
+- **按课程学习**：每门课保留持续会话、资料目录、阅读位置与学习约定；支持在设置中统一管理各课程资料、课件与分类，以及课程归档与恢复。
+- **结合资料讲解与多格式右侧阅读**：并排阅读 PDF、Markdown 与 HTML 资料并支持点击引用直达；Agent 按需读取文字、页面图像、图片和 EPUB 分节，也可在课程资料目录中安全创建或更新自己生成的 Markdown 笔记与离线交互 HTML 页面（不覆盖用户原件或系统文件）。打开文件本身不会自动发送全文内容。用 EmbedPDF 在 PDF 课件上添加文字、直线、矩形和椭圆，Agent 也能在讲解时添加批注；Markdown 阅读器复用对话渲染内核，完整支持 KaTeX、`\ce{}`、化学结构式/反应方程式与折叠目录；HTML 阅读器复用离线沙箱引擎，并支持将对话中的交互画布一键在右侧打开。
 - **交互练习**：判断、选择、填空、简答与闪卡；保存真实作答、提示使用情况和点评。简答支持图片；“继续”会接着上文讲解并参考已保存作答，内部提示不显示在聊天里。
 - **课程日常**：记录考试、截止日期与课程要求，保留来源、条件和更正历史；不自动创建外部日历或提醒。
 - **学科工具**：LaTeX / mhchem、分子结构、反应与电子流图、本地计算与统计、只读 Excel，以及可保存的隔离交互画布。
@@ -23,11 +23,11 @@ A local-first AI study workspace that brings course materials, persistent conver
 
 基础运行需要 **Node.js 22.13+、npm 和兼容的 Codex CLI**。请先按 [Codex 文档](https://developers.openai.com/codex/cli/)安装并登录，再将 `STUDY_CODEX_BIN` 指向该可执行文件。当前桥接要求 `~/.codex/auth.json` 为已有的普通登录文件，通过符号链接在独立运行目录中复用；不包含登录页面，也不处理仅保存在系统钥匙串中的登录方式。
 
-当前模型策略在 [`server/model-policy.mjs`](server/model-policy.mjs) 中固定：Fast / Default 分别使用 GPT-6.1 Terra 的 medium / high，Deep 使用 GPT-6.1 Sol 的 xhigh。课程头像另需 GPT-6 Astra high。账号必须能访问对应模型与能力；这些名称和 Codex 的实验接口不保证适用于所有账号或 CLI 版本。
+Fast / Default / Deep 三个思考强度档位可在「设置 → 偏好与状态」中从当前 Codex 账号暴露的全部模型及其支持的思考强度里自由配置（默认在 [`shared/model-presets.mjs`](shared/model-presets.mjs) 与 [`server/model-policy.mjs`](server/model-policy.mjs) 中预设为 GPT-6.1 Terra medium / high 与 GPT-6.2 Astra high）。课程头像另需 GPT-6 Astra high。账号必须能访问对应模型与能力；这些名称和 Codex 的实验接口不保证适用于所有账号或 CLI 版本。
 
 | 功能 | 额外环境与限制 |
 | --- | --- |
-| PDF 页面供 Agent 读取 | Poppler 的 `pdfinfo`、`pdftotext`、`pdftoppm`；前端 PDF 阅读器使用从 `pdfjs-dist` 生成的本机同源资源。 |
+| PDF 页面供 Agent 读取 | Poppler 的 `pdfinfo`、`pdftotext`、`pdftoppm`；前端使用随应用打包的 EmbedPDF 阅读器和中文字体，备用阅读器使用本机 PDF.js 资源。 |
 | DOCX / PPTX / EPUB 提取 | Python 3；只读取支持的原生内容，不执行 OCR。PPT / PPTX 需另转为 PDF 才能在阅读器中翻页。 |
 | 化学绘图 | Python 环境中安装 RDKit 和 [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem)，按其说明配置，并设置 `STUDY_CHEM_PYTHON`。这些依赖不由 `npm ci` 安装。 |
 | 本地计算、统计与 XLSX / XLSM 读取 | Python 3；分析模块使用标准库。Excel 宏与公式不执行，缓存值可能缺失或过期；旧 XLS 需转换。 |
@@ -73,7 +73,7 @@ export STUDY_NODE_BINARY=/path/to/standalone-arm64-node
 
 ### 架构、数据与边界
 
-- [`src/`](src/)：React / TypeScript 界面、PDF.js 阅读器与内置教学组件。
+- [`src/`](src/)：React / TypeScript 界面、EmbedPDF 阅读器与内置教学组件。
 - [`server/`](server/)：绑定 `127.0.0.1` 的 Node 服务；通过 [Codex app-server](https://developers.openai.com/codex/app-server) 提供课程工具，按需调用本地 Python / Poppler。
 - [`shared/`](shared/)：数据校验、Markdown 扩展、流式状态与绘图队列。
 - [`native/`](native/) / [`script/`](script/)：AppKit / WebKit 外壳及打包、安装脚本。
@@ -82,7 +82,7 @@ export STUDY_NODE_BINARY=/path/to/standalone-arm64-node
 
 “本地优先”不等于离线模型：提问、实际读取的资料、作答和约定会发送到 Codex 使用的模型服务。资料上传后的后台分类也会发送有限文字及必要图片，头像生成会发送课程名称。PDF 显示、资料存储与本地渲染留在机器上。应用复用已有登录，不改全局 Codex 配置。
 
-Agent 的文件工具限定在当前课程目录；独立 Codex 进程关闭任意命令、直接文件编辑及外部插件，保留应用提供的课程工具与公开网页搜索。交互画布在限制网络和主应用访问的独立 iframe 中运行。
+Agent 的文件工具限定在当前课程目录；独立 Codex 进程关闭任意命令、原生直接改文件工具及外部插件，仅保留应用提供的受限课程工具（含在资料目录内安全创建学习文档，禁止修改系统文件或覆盖用户原件）与公开网页搜索。交互画布与 HTML 阅读器均在限制网络和主应用访问的独立沙箱 iframe 中运行。
 
 模型讲解、题目评分与生成图示仍可能出错。化学输入通过排版和电子记账校验，不等于真实机理或实验已验证。单个资料文件上限为 100 MB；有界提取和模型上下文另有限制，整本 PDF / PPTX 的一次文字提取最多前 100 页及 100,000 字符。没有 OCR、语音转写、外部 LMS 登录或云同步功能。
 
@@ -90,8 +90,8 @@ Agent 的文件工具限定在当前课程目录；独立 Codex 进程关闭任�
 
 ### Features
 
-- **Course workspaces:** persistent conversations, materials, reading positions, and learning preferences, with course archiving and restoration.
-- **Material-aware tutoring:** read PDFs beside the conversation and follow citations to a page. The agent can request text, page images, pictures, and EPUB sections. Opening a PDF alone does not send its page content.
+- **Course workspaces:** persistent conversations, materials, reading positions, and learning preferences, with unified material/courseware management in Settings and course archiving/restoration.
+- **Material-aware tutoring & multi-format side reader:** read PDF, Markdown, and HTML files side by side with the conversation and follow citations directly. The agent reads text, page images, pictures, and EPUB sections on demand, and can create or update its own Markdown notes and self-contained offline HTML pages inside course material folders (never overwriting user originals or system files). EmbedPDF lets you and the agent add text, lines, rectangles, and ellipses to PDF slides, search full text, quote selections/regions in chat, and export annotated copies. The Markdown reader reuses the chat renderer for KaTeX, `\ce{}`, native vector chemical structures/equations, and a collapsible outline; the HTML reader reuses the sandboxed canvas iframe and lets you open chat canvases directly in the right pane.
 - **Interactive practice:** true/false, multiple choice, fill-in-the-blank, short answers, and flashcards. Actual submissions, hint use, and feedback are saved. Short answers accept images; Continue resumes the lesson using saved submissions without showing its internal prompt.
 - **Course planning:** exams, deadlines, and course requirements retain sources, conditions, and revision history. No external calendar events or reminders are created automatically.
 - **Subject tools:** LaTeX / mhchem, molecular structures, reactions, electron-flow diagrams, local calculations and statistics, read-only Excel, and saved sandboxed interactive canvases.
@@ -103,11 +103,11 @@ The primary development and packaging target is **Apple Silicon macOS**. The nat
 
 Basic operation requires **Node.js 22.13+, npm, and a compatible Codex CLI**. Follow the [Codex documentation](https://developers.openai.com/codex/cli/) to install and sign in, then point `STUDY_CODEX_BIN` to the executable. The current bridge requires an existing regular `~/.codex/auth.json` file and reuses it through a symbolic link in its isolated runtime directory. It has no built-in sign-in screen or support for credentials stored exclusively in the system keychain.
 
-[`server/model-policy.mjs`](server/model-policy.mjs) currently pins Fast / Default to GPT-6.1 Terra medium / high, and Deep to GPT-6.1 Sol xhigh. Course avatar generation additionally requires GPT-6 Astra high. Your account must expose the corresponding models and capabilities; these names and Codex’s experimental interfaces are not guaranteed to work with every account or CLI version.
+Fast / Default / Deep thinking presets can be configured in Settings from all models and reasoning efforts exposed by your Codex account (defaulting in [`shared/model-presets.mjs`](shared/model-presets.mjs) and [`server/model-policy.mjs`](server/model-policy.mjs) to GPT-6.1 Terra medium / high and GPT-6.2 Astra high). Course avatar generation additionally requires GPT-6 Astra high. Your account must expose the corresponding models and capabilities; these names and Codex’s experimental interfaces are not guaranteed to work with every account or CLI version.
 
 | Feature | Additional requirements and limits |
 | --- | --- |
-| Agent access to PDF pages | Poppler: `pdfinfo`, `pdftotext`, and `pdftoppm`. The frontend reader uses local same-origin assets generated from `pdfjs-dist`. |
+| Agent access to PDF pages | Poppler: `pdfinfo`, `pdftotext`, and `pdftoppm`. The frontend bundles EmbedPDF and a Chinese font. The fallback reader uses local PDF.js assets. |
 | DOCX / PPTX / EPUB extraction | Python 3; supported native content only, without OCR. Convert PPT / PPTX to PDF separately for page-by-page reading. |
 | Chemical rendering | A Python environment with RDKit and [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem). Follow its setup instructions and set `STUDY_CHEM_PYTHON`; `npm ci` does not install these tools. |
 | Calculations, statistics, and XLSX / XLSM reading | Python 3; the analysis modules use its standard library. Macros and formulas are not executed; cached values may be missing or stale. Convert legacy XLS files first. |
@@ -153,7 +153,7 @@ The bundle includes the native shell, Node, frontend, backend, and production np
 
 ### Architecture, data, and boundaries
 
-- [`src/`](src/): React / TypeScript interface, PDF.js reader, and built-in teaching components.
+- [`src/`](src/): React / TypeScript interface, EmbedPDF reader, and built-in teaching components.
 - [`server/`](server/): Node service bound to `127.0.0.1`, exposing course tools through [Codex app-server](https://developers.openai.com/codex/app-server) and calling local Python / Poppler when needed.
 - [`shared/`](shared/): validation, Markdown extensions, streaming state, and the rendering queue.
 - [`native/`](native/) / [`script/`](script/): AppKit / WebKit shell, packaging, and installation scripts.
@@ -162,7 +162,7 @@ Course files default to `~/Documents/StudyStudio/`, with per-course state under 
 
 Local-first does not mean an offline model. Questions, material actually read, submissions, and learning agreements are sent to the model service used by Codex. Background classification after uploads also sends bounded text and necessary images; avatar generation sends the course name. PDF display, file storage, and local rendering remain on the machine. The application reuses existing authentication without changing global Codex configuration.
 
-The agent’s file tools are restricted to the active course directory. Its isolated Codex process disables arbitrary commands, direct file editing, and external plugins, while retaining application-provided course tools and public web search. Interactive canvases run in separate iframes with network and host-app access restricted.
+The agent’s file tools are restricted to the active course directory. Its isolated Codex process disables arbitrary commands, native direct file-editing tools, and external plugins, while retaining bounded application-provided course tools (including safe material creation without overwriting user originals or system files) and public web search. Both interactive canvases and the HTML reader run in separate sandboxed iframes with network and host-app access restricted.
 
 Model explanations, grading, and generated diagrams can be wrong. Chemical layout and electron-accounting checks do not validate a real mechanism or experiment. Individual material files are limited to 100 MB; extraction and model context have separate bounds. A whole-document PDF / PPTX text extraction reads at most the first 100 pages and 100,000 characters. OCR, speech transcription, external LMS login, and cloud synchronization are not provided.
 

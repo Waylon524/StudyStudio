@@ -6,9 +6,16 @@ import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CodexBridge } from './codex.mjs';
+import {checkedModel,checkedTurn,validatePresetConfigs} from './model-policy.mjs';
+import {DEFAULT_PRESET_CONFIGS,isValidEffort,normalizePresetConfigs} from '../shared/model-presets.mjs';
 import { handleChemistry } from './chemistry.mjs';
 import { LearningStore } from './learning.mjs';
 import { createPageAccess } from './lazy-pdf.mjs';
+import {pdfSelectionContext} from './pdf-selection-context.mjs';
+import {PdfAnnotations} from './pdf-annotations.mjs';
+import {annotatePdf} from './pdf-annotation-tool.mjs';
+import {writeWorkspaceFileForAgent} from './workspace-write-tool.mjs';
+import {boundPdfRegion} from '../shared/pdf-markup.mjs';
 import { CourseRequirements } from './requirements.mjs';
 import { CourseSchedule } from './course-schedule.mjs';
 import { ImportOrganizer } from './import-organizer.mjs';
@@ -25,7 +32,25 @@ import {CONTINUE_INPUT,hideContinuationInputs} from '../shared/continuation.mjs'
 const port=Number(process.env.STUDY_PORT || 4317);
 if(!Number.isInteger(port)||port<1||port>65535)throw Error('服务端口无效');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const dataDir=dataRoot, indexFile=path.join(dataDir,'chats.json'), coursesFile=path.join(dataDir,'courses.json');
+const appVersion=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version||'0.20.22';
+const dataDir=dataRoot, indexFile=path.join(dataDir,'chats.json'), coursesFile=path.join(dataDir,'courses.json'), settingsFile=path.join(dataDir,'settings.json');
+let userSettings={};
+try {const parsed=JSON.parse(await fs.readFile(settingsFile,'utf8'));if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))userSettings=parsed;} catch(e){if(e.code!=='ENOENT')throw e}
+let settingsSave=Promise.resolve();
+function saveUserSettings(update){
+  const job=settingsSave.catch(()=>{}).then(async()=>{
+    const next=structuredClone(userSettings);
+    const result=await update(next);
+    await fs.mkdir(dataDir,{recursive:true,mode:0o700});
+    const temp=settingsFile+'.'+randomUUID()+'.tmp';
+    try{await fs.writeFile(temp,JSON.stringify(next,null,2),{flag:'wx',mode:0o600});await fs.rename(temp,settingsFile);}
+    catch(error){await fs.unlink(temp).catch(()=>{});throw error;}
+    userSettings=next;
+    return result;
+  });
+  settingsSave=job;return job;
+}
+function currentPresetConfigs(){return normalizePresetConfigs(userSettings.presets);}
 const defaultCourse={id:'general',name:'通用学习'};
 let courses=[defaultCourse];
 try {const parsed=JSON.parse(await fs.readFile(coursesFile,'utf8'));if(Array.isArray(parsed)){const savedGeneral=parsed.find(x=>x?.id==='general'),general={...savedGeneral,...defaultCourse};delete general.archivedAt;courses=[general,...parsed.filter(x=>x && x.id!=='general' && typeof x.id==='string' && typeof x.name==='string').map(course=>({...course}))];}} catch(e){if(e.code!=='ENOENT')throw e}
@@ -38,6 +63,7 @@ function requireActiveCourse(course){if(!course)throw httpError(404,'课程不�
 const preparingTurns=new Set(),courseWrites=new Map();
 function retainCourseWrite(course){courseWrites.set(course.id,(courseWrites.get(course.id)||0)+1);return ()=>{const count=courseWrites.get(course.id)||0;if(count<=1)courseWrites.delete(course.id);else courseWrites.set(course.id,count-1)}}
 const store=new LearningStore();
+const pdfAnnotations=new PdfAnnotations({store});
 const bridge=new CodexBridge(), clients=new Map(), resumed=new Set(), activeTurns=new Map(), freshThreads=new Map();
 const requirements=new CourseRequirements(store);
 const schedule=new CourseSchedule({store,requirements});
@@ -91,7 +117,8 @@ function updateCourses(update){
   });courseSave=job;return job;
 }
 function saveCourseThread(course,id){return updateCourses(next=>{const current=next.find(item=>item.id===course.id);if(!current)throw httpError(404,'课程不存在');if(current.archivedAt)throw httpError(409,'课程已归档，请先在设置中恢复。');current.threadId=id})}
-function archiveBusy(course){return preparingTurns.has(course.id)||courseWrites.has(course.id)||courseCreation.has(course.id)||pendingImports.has(course.id)||importEnqueues.has(course.id)||organizer.queues.has(course.id)||[...activeTurns.values()].some(turn=>turn.course.id===course.id)}
+function courseTurnBusy(course){return preparingTurns.has(course.id)||[...activeTurns.values()].some(turn=>turn.course.id===course.id)}
+function archiveBusy(course){return courseTurnBusy(course)||courseWrites.has(course.id)||courseCreation.has(course.id)||pendingImports.has(course.id)||importEnqueues.has(course.id)||organizer.queues.has(course.id)}
 async function recoverCourse(course){
   if(isArchived(course))return;const release=retainCourseWrite(course);
   try{await organizer.recover(course);if(isArchived(course))return;
@@ -117,17 +144,29 @@ async function courseConversation(course,model){
 }
 function json(res,status,value){if(res.writableEnded)return;res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))}
 async function body(req,maxBytes=128*1024){const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>maxBytes)throw new Error('请求过大');chunks.push(chunk)}const v=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}');if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('无效请求');return v}
-function validModel(s){return s==null || typeof s==='string' && /^[\w.:-]{1,100}$/.test(s)}
+function validModel(value){try{checkedModel(value);return true}catch{return false}}
 function safeOrigin(req){const host=req.headers.host;if(![`127.0.0.1:${port}`,`localhost:${port}`,'127.0.0.1:5173','localhost:5173'].includes(host))return false;const origin=req.headers.origin;if(!origin)return req.method==='GET';return [`http://127.0.0.1:${port}`,`http://localhost:${port}`,'http://127.0.0.1:5173','http://localhost:5173'].includes(origin)}
 async function bytes(req){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>MAX_MATERIAL_BYTES)throw httpError(413,'附件超过 '+MATERIAL_SIZE_LABEL);const chunks=[];let n=0;for await(const chunk of req){n+=chunk.length;if(n>MAX_MATERIAL_BYTES)throw httpError(413,'附件超过 '+MATERIAL_SIZE_LABEL);chunks.push(chunk)}return Buffer.concat(chunks)}
 function sse(id,event){for(const res of clients.get(id)||[])res.write('data: '+JSON.stringify(event)+'\n\n')}
+function pdfAnnotationsUpdated(scope){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===scope.courseId))sse(id,{method:'pdf/annotations-updated',params:scope})}
+function sourcesUpdated(course){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===course.id))sse(id,{method:'sources/updated',params:{threadId:id}})}
 function normalizeStudy(spec){
   return prepareTeachingSpec(spec).questionSpec;
 }
-bridge.toolHandler=async ({threadId,tool,arguments:args,callId})=>{
+bridge.toolHandler=async ({threadId,turnId,tool,arguments:args,callId})=>{
   const row=chats.find(x=>x.id===threadId);if(!row)throw Error('对话不存在');const course=courseById(row.courseId);if(!course||!args||typeof args!=='object')throw Error('课程或工具参数无效');
+  if(tool==='study_render'&&args.spec?.operation==='pdf_annotate'){tool='study_pdf_annotate';args=args.spec.arguments;if(!args||typeof args!=='object'||Array.isArray(args))throw Error('PDF 批注参数无效。');}
+  if(tool==='study_render'&&args.spec?.operation==='workspace_write'){tool='study_workspace_write';args=args.spec.arguments;if(!args||typeof args!=='object'||Array.isArray(args))throw Error('创建资料文件参数无效。');}
   if(tool==='study_render'){const request=parseAnalysisRequest(args.spec);if(request){tool=request.tool;args=request.arguments;}}
   const updateMemory=async value=>{const active=activeTurns.get(threadId),evidence=value.evidence;if(typeof evidence!=='string'||!evidence.trim()||evidence.length>1000||!active?.text.includes(evidence))throw Error('记忆依据必须是本轮用户消息中的原话。');const result=await store.updateMemory(course,{...value,source:`用户本轮消息（会话 ${threadId}）`});sse(threadId,{method:'study/updated',params:{threadId}});return result};
+  if(tool==='study_pdf_annotate'){
+    requireActiveCourse(course);const active=activeTurns.get(threadId),release=retainCourseWrite(course);
+    try{return await annotatePdf({pdfAnnotations,course,active,args,threadId,turnId,callId,isActive:()=>activeTurns.get(threadId)===active&&!active?.completion,write:operation=>organizer._withFileChange(course,async()=>{requireActiveCourse(course);return operation()}),onUpdate:pdfAnnotationsUpdated})}finally{release()}
+  }
+  if(tool==='study_workspace_write'){
+    requireActiveCourse(course);const active=activeTurns.get(threadId),release=retainCourseWrite(course);
+    try{return await writeWorkspaceFileForAgent({store,course,active,args,callId,isActive:()=>activeTurns.get(threadId)===active&&!active?.completion,write:operation=>organizer._withFileChange(course,async()=>{requireActiveCourse(course);return operation()}),onUpdate:sourcesUpdated})}finally{release()}
+  }
   if(tool==='study_calculate')return calculate(args);
   if(tool==='study_analyze'){
     if(!args.source)return analyze(args);
@@ -193,18 +232,35 @@ bridge.on('event',evt=>{const id=evt.params.threadId;if(!owned(id))return;sse(id
   }
 });
 bridge.on('disconnected',()=>{resumed.clear();freshThreads.clear();for(const state of activeTurns.values())state.pageAccess?.close().catch(()=>{});activeTurns.clear();for(const id of clients.keys())sse(id,{method:'connection/error',params:{threadId:id,message:'Codex 连接已关闭'}})});
-const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.wasm':'application/wasm','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2'};
+const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.wasm':'application/wasm','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.woff2':'font/woff2','.otf':'font/otf'};
 const server=http.createServer(async(req,res)=>{
  try{
   if(!safeOrigin(req))return json(res,403,{error:'访问来源不被允许'});
   const url=new URL(req.url,'http://127.0.0.1:4317');
-  if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{app:'study-studio',version:'0.20.9',instanceToken:process.env.STUDY_INSTANCE_TOKEN||null});
+  if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{app:'study-studio',version:appVersion,instanceToken:process.env.STUDY_INSTANCE_TOKEN||null});
+  if(req.method==='GET'&&url.pathname==='/api/settings/info')return json(res,200,{version:appVersion,workspaceRoot:store.root,maxMaterialBytes:MAX_MATERIAL_BYTES,maxMaterialLabel:MATERIAL_SIZE_LABEL,presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+  if(req.method==='GET'&&url.pathname==='/api/settings/presets')return json(res,200,{presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+  if(req.method==='POST'&&url.pathname==='/api/settings/presets'){
+    const v=await body(req);
+    if(v.reset===true){
+      await saveUserSettings(next=>{delete next.presets;});
+      return json(res,200,{presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+    }
+    await bridge.start();
+    const catalog=await bridge.modelCatalog();
+    let validated;
+    try{validated=validatePresetConfigs(catalog,v.presets);}catch(error){return json(res,400,{error:error.message});}
+    await saveUserSettings(next=>{next.presets=validated;});
+    return json(res,200,{presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+  }
   if(url.pathname==='/api/chem/render' && req.method==='POST'){await handleChemistry(req,res,url);return}
-  if(req.method==='GET' && url.pathname==='/api/status')return json(res,200,await bridge.status());
+  if(req.method==='GET' && url.pathname==='/api/status')return json(res,200,{...await bridge.status({force:url.searchParams.get('refresh')==='1'}),presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
   if(req.method==='GET' && url.pathname==='/api/courses'){
     await courseSave.catch(()=>{});const visible=courses.filter(course=>url.searchParams.get('includeArchived')==='true'||!course.archivedAt);
+    const includeStats=url.searchParams.get('stats')==='true';
     const results=await Promise.allSettled(visible.map(course=>course.archivedAt?undefined:store.initCourse(course)));
-    return json(res,200,{courses:visible.map((course,i)=>results[i].status==='rejected'?{...course,workspaceError:String(results[i].reason?.message||'课程工作区初始化失败')}:course)});
+    const statsList=includeStats?await Promise.allSettled(visible.map((course,i)=>results[i].status==='rejected'?Promise.reject(results[i].reason):store.courseStats(course,{readonly:!!course.archivedAt}))):null;
+    return json(res,200,{courses:visible.map((course,i)=>({...(results[i].status==='rejected'?{...course,workspaceError:String(results[i].reason?.message||'课程工作区初始化失败')}:course),...(statsList&&statsList[i].status==='fulfilled'?{stats:statsList[i].value}:{})}))});
   }
   if(req.method==='POST' && url.pathname==='/api/courses'){
     const v=await body(req);if(typeof v.name!=='string'||!v.name.trim()||v.name.trim().length>80)return json(res,400,{error:'课程名称无效'});
@@ -226,7 +282,26 @@ const server=http.createServer(async(req,res)=>{
   const match=/^\/api\/threads\/([0-9a-f-]+)$/.exec(url.pathname);
   if(req.method==='GET' && match){const id=match[1];if(!owned(id))return json(res,404,{error:'对话不存在'});const row=chats.find(c=>c.id===id),course=requireActiveCourse(courseById(row.courseId)),coursePath=await store.initCourse(course);let thread;if(resumed.has(id)&&freshThreads.has(id))thread=freshThreads.get(id);else if(resumed.has(id))thread=(await bridge.read(id)).thread;else{thread=(await bridge.resume(id,course.name,row.mode,coursePath)).thread;resumed.add(id)}return json(res,200,{thread:{id,courseId:row.courseId,mode:row.mode,turns:hideContinuationInputs(thread.turns,row.turnActions),turnActions:row.turnActions||{},attachments:row.attachments||{},studyRenders:row.studyRenders||{},readerContexts:row.readerContexts||{}}})}
   if(req.method==='GET' && url.pathname==='/api/events'){const id=url.searchParams.get('threadId');if(!owned(id))return json(res,404,{error:'对话不存在'});res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache, no-transform','Connection':'keep-alive','X-Accel-Buffering':'no'});res.write(': connected\n\n');if(!clients.has(id))clients.set(id,new Set());clients.get(id).add(res);req.on('close',()=>{clients.get(id)?.delete(res);if(!clients.get(id)?.size)clients.delete(id)});return}
-  const cr=/^\/api\/courses\/([0-9a-z-]+)\/(learning|workspace|instructions|attachments|answer-images|attempts|reveal|feedback|files\/list|files\/read|study\/register|sources|sources\/select|sources\/move|folders|reader|requirements|imports|imports\/retry|avatar|schedule|canvas\/save|canvas\/activity)$/.exec(url.pathname);
+  const annotationRoute=/^\/api\/courses\/([0-9a-z-]+)\/pdf-annotations$/.exec(url.pathname);
+  if(annotationRoute){
+    const course=requireActiveCourse(courseById(annotationRoute[1])),release=retainCourseWrite(course);
+    try{
+      if(req.method!=='GET'&&req.method!=='POST')return json(res,405,{error:'方法不支持'});
+      let request;
+      try{
+        const allPages=req.method==='GET'&&url.searchParams.has('all');
+        if(allPages&&(url.searchParams.get('all')!=='1'||url.searchParams.has('page')))throw new TypeError('整份课件批注请求应使用 all=1，且不指定单页。');
+        request=req.method==='GET'?{sourceId:url.searchParams.get('sourceId'),...(allPages?{}:{page:Number(url.searchParams.get('page'))})}:await body(req);
+        const result=await organizer._withFileChange(course,async()=>{
+          requireActiveCourse(course);
+          return req.method==='GET'?(allPages?pdfAnnotations.listAll(course,request):pdfAnnotations.list(course,request)):pdfAnnotations.change(course,request);
+        });
+        if(req.method==='POST')pdfAnnotationsUpdated({courseId:course.id,sourceId:request.sourceId,page:request.page});
+        return json(res,200,result);
+      }catch(error){if(error instanceof TypeError||error instanceof SyntaxError)throw httpError(400,error.message);throw error}
+    }finally{release()}
+  }
+  const cr=/^\/api\/courses\/([0-9a-z-]+)\/(learning|workspace|instructions|attachments|answer-images|attempts|reveal|feedback|files\/list|files\/read|study\/register|sources|sources\/select|sources\/move|sources\/move-batch|sources\/rename|sources\/delete|folders|folders\/rename|folders\/delete|reader|requirements|imports|imports\/retry|avatar|schedule|canvas\/save|canvas\/activity)$/.exec(url.pathname);
   if(cr){const course=requireActiveCourse(courseById(cr[1])),release=req.method==='GET'?()=>{}:retainCourseWrite(course);try{const action=cr[2];
     if(req.method==='GET'&&action==='schedule')return json(res,200,await schedule.list(course));
     if(req.method==='GET'&&action==='avatar')return json(res,200,{avatar:await avatars.ensure(course)});
@@ -241,15 +316,20 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&action==='sources')return json(res,200,{sources:await store.listSources(course)});
     if(req.method==='POST'&&action==='sources/select'){const v=await body(req);return json(res,200,{sources:await store.selectSources(course,v.sourceIds)})}
     if(req.method==='POST'&&action==='sources/move'){const v=await body(req);return json(res,200,{source:await organizer.moveAndConfirmSource(course,v)})}
+    if(req.method==='POST'&&action==='sources/move-batch'){const v=await body(req);return json(res,200,await organizer.moveAndConfirmSources(course,v))}
+    if(req.method==='POST'&&action==='sources/rename'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再重命名文件。');const v=await body(req);return json(res,200,{source:await organizer.renameSource(course,v)})}
+    if(req.method==='POST'&&action==='sources/delete'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再删除文件。');const v=await body(req);return json(res,200,await organizer.deleteSources(course,v.sourceIds,{onSourceDeleted:sourceId=>pdfAnnotations.removeSource(course,sourceId)}))}
     if(req.method==='GET'&&action==='folders')return json(res,200,{folders:await store.listFolders(course)});
-    if(req.method==='POST'&&action==='folders'){const v=await body(req);await store.makeFolder(course,v.path);return json(res,200,{folders:await store.listFolders(course)})}
+    if(req.method==='POST'&&action==='folders'){const v=await body(req);await store.makeFolder(course,v.path);if(course.threadId)sse(course.threadId,{method:'sources/updated',params:{threadId:course.threadId}});return json(res,200,{folders:await store.listFolders(course)})}
+    if(req.method==='POST'&&action==='folders/rename'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再重命名分类。');const v=await body(req);return json(res,200,await organizer.renameFolder(course,v))}
+    if(req.method==='POST'&&action==='folders/delete'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再删除分类。');const v=await body(req);return json(res,200,await organizer.deleteFolder(course,v.path))}
     if(req.method==='GET'&&action==='reader')return json(res,200,{reader:await store.getReader(course)});
     if(req.method==='POST'&&action==='reader')return json(res,200,{reader:await store.setReader(course,await body(req))});
     if(req.method==='GET'&&action==='workspace'){const instructions=await store.readInstructions(course), files=await store.listFiles(course);const summary=await store.learning(course);return json(res,200,{workspacePath:instructions.workspacePath,files,instructions:instructions.content,instructionsVersion:instructions.version,memory:await store.listMemory(course),progress:summary.progress,importantInfo:summary.importantInfo})}
     if((req.method==='PUT'||req.method==='POST')&&action==='instructions'){const v=await body(req);return json(res,200,await store.updateInstructions(course,v))}
     if(req.method==='GET'&&action==='files/list')return json(res,200,{files:await store.listFiles(course)});
-    if(req.method==='GET'&&action==='files/read'){const value=await store.readFile(course,url.searchParams.get('path'));if(value.absolutePath)delete value.absolutePath;return json(res,200,{...value,path:value.relativePath})}
-    if(req.method==='POST'&&action==='attachments'){let name,folder;try{name=decodeURIComponent(req.headers['x-file-name']||'');folder=req.headers['x-folder']===undefined?'待整理':decodeURIComponent(req.headers['x-folder'])}catch{return json(res,400,{error:'附件名称或目录无效'})}const attachment=await store.upload(course,{name,folder,mime:req.headers['content-type']||'application/octet-stream',data:await bytes(req)});scheduleImport(course,attachment.id);return json(res,201,{attachment:{...attachment,url:`/api/courses/${course.id}/attachments/${attachment.id}`}})}
+    if(req.method==='GET'&&action==='files/read'){const readerMode=url.searchParams.get('mode')==='reader';const value=await store.readFile(course,url.searchParams.get('path'),readerMode?{limit:500000}:{});if(value.absolutePath)delete value.absolutePath;return json(res,200,{...value,path:value.relativePath})}
+    if(req.method==='POST'&&action==='attachments'){let name,folder;try{name=decodeURIComponent(req.headers['x-file-name']||'');folder=req.headers['x-folder']===undefined?'待整理':decodeURIComponent(req.headers['x-folder'])}catch{return json(res,400,{error:'附件名称或目录无效'})}const intent=req.headers['x-upload-intent'],attachment=await store.upload(course,{name,folder,intent,mime:req.headers['content-type']||'application/octet-stream',data:await bytes(req)});if(intent!=='courseware'&&intent!=='direct')scheduleImport(course,attachment.id);if(course.threadId)sse(course.threadId,{method:'sources/updated',params:{threadId:course.threadId}});return json(res,201,{attachment:{...attachment,url:`/api/courses/${course.id}/attachments/${attachment.id}`}})}
     if(req.method==='POST'&&action==='answer-images')return json(res,201,await store.uploadAnswerImage(course,await body(req,15*1024*1024)));
     if(req.method==='POST'&&action==='attempts')return json(res,200,await store.submitAttempt(course,await body(req)));
     if(req.method==='POST'&&action==='reveal'){const v=await body(req);return json(res,200,await store.reveal(course,v.questionId))}
@@ -273,12 +353,13 @@ const server=http.createServer(async(req,res)=>{
   const scheduleRoute=/^\/api\/courses\/([0-9a-z-]+)\/schedule\/(req-[0-9a-f-]{36})$/.exec(url.pathname);
   if(req.method==='DELETE'&&scheduleRoute){const course=requireActiveCourse(courseById(scheduleRoute[1])),release=retainCourseWrite(course);try{const result=await schedule.remove(course,scheduleRoute[2]);if(course.threadId)sse(course.threadId,{method:'study/updated',params:{threadId:course.threadId}});return json(res,200,result)}finally{release()}}
   const sourceRoute=/^\/api\/courses\/([0-9a-z-]+)\/sources\/([0-9a-f]{24})\/file$/.exec(url.pathname);
-  if(req.method==='GET'&&sourceRoute){const course=courseById(sourceRoute[1]);if(!course)return json(res,404,{error:'课程不存在'});const source=await store.sourceById(course,sourceRoute[2]);if(!source)return json(res,404,{error:'资料不存在'});const target=await store.safePath(course,source.relativePath),file=await fs.open(target,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);try{const st=await file.stat();if(!st.isFile()||st.size>MAX_MATERIAL_BYTES)throw Error('资料不存在或超过 '+MATERIAL_SIZE_LABEL);let start=0,end=st.size-1,status=200;const range=req.headers.range;if(range){const match=/^bytes=(\d*)-(\d*)$/.exec(range);if(!match||(!match[1]&&!match[2])){res.writeHead(416,{'Content-Range':`bytes */${st.size}`});return res.end()}if(!match[1]){const count=Number(match[2]);start=Math.max(st.size-count,0)}else{start=Number(match[1]);if(match[2])end=Math.min(Number(match[2]),end)}if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||start>=st.size){res.writeHead(416,{'Content-Range':`bytes */${st.size}`});return res.end()}status=206}const data=Buffer.alloc(end-start+1);let bytesRead=0;while(bytesRead<data.length){const read=await file.read(data,bytesRead,data.length-bytesRead,start+bytesRead);if(!read.bytesRead)throw Error('资料读取未完成，文件可能已更改。');bytesRead+=read.bytesRead;}const inline=['image/png','image/jpeg','image/webp','image/gif','application/pdf'].includes(source.mime);res.writeHead(status,{'Content-Type':inline?source.mime:'application/octet-stream','Content-Length':bytesRead,'Accept-Ranges':'bytes',...(status===206?{'Content-Range':`bytes ${start}-${end}/${st.size}`} : {}),'Content-Disposition':(inline?'inline':'attachment')+`; filename*=UTF-8''${encodeURIComponent(source.name)}`,'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'no-store'});return res.end(data)}finally{await file.close()}}
+  if(req.method==='GET'&&sourceRoute){const course=courseById(sourceRoute[1]);if(!course)return json(res,404,{error:'课程不存在'});const source=await store.sourceById(course,sourceRoute[2]);if(!source)return json(res,404,{error:'资料不存在'});const target=await store.safePath(course,source.relativePath),file=await fs.open(target,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);try{const st=await file.stat();if(!st.isFile()||st.size>MAX_MATERIAL_BYTES)throw Error('资料不存在或超过 '+MATERIAL_SIZE_LABEL);let start=0,end=st.size-1,status=200;const range=req.headers.range;if(range){const match=/^bytes=(\d*)-(\d*)$/.exec(range);if(!match||(!match[1]&&!match[2])){res.writeHead(416,{'Content-Range':`bytes */${st.size}`});return res.end()}if(!match[1]){const count=Number(match[2]);start=Math.max(st.size-count,0)}else{start=Number(match[1]);if(match[2])end=Math.min(Number(match[2]),end)}if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start>end||start>=st.size){res.writeHead(416,{'Content-Range':`bytes */${st.size}`});return res.end()}status=206}const data=Buffer.alloc(end-start+1);let bytesRead=0;while(bytesRead<data.length){const read=await file.read(data,bytesRead,data.length-bytesRead,start+bytesRead);if(!read.bytesRead)throw Error('资料读取未完成，文件可能已更改。');bytesRead+=read.bytesRead;}const forceDownload=url.searchParams.get('download')==='1';const inline=!forceDownload&&['image/png','image/jpeg','image/webp','image/gif','application/pdf'].includes(source.mime);res.writeHead(status,{'Content-Type':inline?source.mime:'application/octet-stream','Content-Length':bytesRead,'Accept-Ranges':'bytes',...(status===206?{'Content-Range':`bytes ${start}-${end}/${st.size}`} : {}),'Content-Disposition':(inline?'inline':'attachment')+`; filename*=UTF-8''${encodeURIComponent(source.name)}`,'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'no-store'});return res.end(data)}finally{await file.close()}}
   const attachmentRoute=/^\/api\/courses\/([0-9a-z-]+)\/attachments\/([0-9a-f-]+)$/.exec(url.pathname);
   if(req.method==='GET'&&attachmentRoute){const course=courseById(attachmentRoute[1]);if(!course)return json(res,404,{error:'课程不存在'});const a=await store.attachment(course,attachmentRoute[2]);const file=await fs.open(a.absolutePath,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);let data;try{const stat=await file.stat();if(!stat.isFile()||stat.size>MAX_MATERIAL_BYTES)throw Error('附件不存在或超过 '+MATERIAL_SIZE_LABEL);data=await file.readFile()}finally{await file.close()}const inline=['image/png','image/jpeg','image/webp','image/gif'].includes(a.mime);res.writeHead(200,{'Content-Type':inline?a.mime:'application/octet-stream','Content-Disposition':(inline?'inline':'attachment')+`; filename*=UTF-8''${encodeURIComponent(a.name)}`,'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'});return res.end(data)}
   if(req.method==='POST' && url.pathname==='/api/turn'){
     const v=await body(req),continuing=v.action==='continue',text=continuing?'继续讲解':v.text??'',attachments=v.attachmentIds??[];
-    if(!(v.action==null||continuing)||(continuing&&(!v.threadId||v.text!=null&&v.text!==''||attachments.length))||(v.threadId!=null&&!owned(v.threadId))||typeof text!=='string'||text.length>50000||!Array.isArray(attachments)||attachments.length>10||attachments.some(x=>typeof x!=='string')||(!text.trim()&&!attachments.length)||!validModel(v.model)||!(v.effort==null||['low','medium','high','xhigh','max','ultra'].includes(v.effort)))return json(res,400,{error:'消息参数无效'});
+    if(!(v.action==null||continuing)||(continuing&&(!v.threadId||v.text!=null&&v.text!==''||attachments.length))||(v.threadId!=null&&!owned(v.threadId))||typeof text!=='string'||text.length>50000||!Array.isArray(attachments)||attachments.length>10||attachments.some(x=>typeof x!=='string')||(!text.trim()&&!attachments.length)||!validModel(v.model)||!(v.effort===undefined||isValidEffort(v.effort)))return json(res,400,{error:'消息参数无效'});
+    try{checkedTurn(v.model,v.effort)}catch(error){return json(res,400,{error:error.message})}
     const requestedCourse=requireActiveCourse(courseById(v.threadId?chats.find(row=>row.id===v.threadId)?.courseId:v.courseId??'general'));
     if(preparingTurns.has(requestedCourse.id))return json(res,409,{error:'当前对话正在准备，请稍候'});preparingTurns.add(requestedCourse.id);try{
     if(!v.threadId){const courseId=v.courseId??'general',mode=v.mode??'explain',course=courseById(courseId);if(!course||!modes.has(mode))return json(res,400,{error:'课程或模式无效'});v.threadId=(await courseConversation(course,v.model)).threadId}
@@ -290,6 +371,16 @@ const server=http.createServer(async(req,res)=>{
     let readerSnapshot=null;
     if(Object.prototype.hasOwnProperty.call(v,'reader')){if(v.reader!==null){if(!v.reader||typeof v.reader!=='object'||Array.isArray(v.reader))throw Error('阅读器状态无效。');readerSnapshot=await store.resolveReader(course,v.reader);}}
     else {const current=await store.getReader(course);if(current)readerSnapshot=await store.resolveReader(course,current);}
+    let activeDocReference=null;
+    if(!readerSnapshot&&v.activeDocument&&typeof v.activeDocument==='object'&&!Array.isArray(v.activeDocument)){
+      if(['markdown','html'].includes(v.activeDocument.kind)&&typeof v.activeDocument.sourceId==='string'&&/^[0-9a-f]{24}$/.test(v.activeDocument.sourceId)){
+        const docSource=await store.sourceById(course,v.activeDocument.sourceId).catch(()=>null);
+        if(docSource)activeDocReference={kind:v.activeDocument.kind,sourceId:docSource.id,name:docSource.name,relativePath:docSource.relativePath};
+      }else if(v.activeDocument.kind==='canvas'&&typeof v.activeDocument.title==='string'&&v.activeDocument.title.trim()){
+        activeDocReference={kind:'canvas',title:v.activeDocument.title.trim().slice(0,160)};
+      }
+    }
+    const selectedPassage=pdfSelectionContext(v.reader,readerSnapshot,course.id);
     const infos=await Promise.all(attachments.map(id=>store.attachment(course,id))),images=[],material=[],sources=await store.listSources(course);
     for(const a of infos){const sourceId=(sources.find(x=>x.relativePath===a.relativePath)||await store.sourceForPath(course,a.relativePath)).id;if(path.extname(a.relativePath).toLowerCase()==='.pdf'){material.push({attachmentId:a.id,name:a.name,sourceId,relativePath:a.relativePath,note:'PDF 附件仅提供文件定位；如需内容请按需读取。'});}else if(['image/png','image/jpeg','image/webp','image/gif'].includes(a.mime)){images.push(a.absolutePath);material.push({attachmentId:a.id,name:a.name,sourceId,kind:'image',note:'本轮已作为图片输入'})}else {const read=await store.readFile(course,a.relativePath);material.push({attachmentId:a.id,name:a.name,sourceId,text:read.text,warning:read.warning,truncated:read.truncated})}}
     const timeContext={now:new Date().toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,localDate:new Intl.DateTimeFormat('en-CA',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())};
@@ -300,13 +391,14 @@ const server=http.createServer(async(req,res)=>{
     const compactRequirements=currentRequirements.map(item=>{const stored=snapshot.state.requirements?.find(entry=>entry.id===item.id);return {...item,source:compactSource(item.source),historyAvailable:(stored?.revisions.length||0)>1};});
     const currentSchedule=await schedule.list(course,{state:snapshot.state,records:currentRequirements});
     const context=snapshot.context+'\n\n课程要求当前版本（更正使用 id/revision，历史可读取课程重要信息.md）：\n'+JSON.stringify(compactRequirements)+'\n\n本机当前时间（解析本轮相对日期，不代替来源）：\n'+JSON.stringify(timeContext)+'\n\n日程索引及用户删除记录（详情见上述课程要求，不要恢复已删除项）：\n'+JSON.stringify({events:currentSchedule.events.map(({id,start,end,allDay,timezone})=>({id,start,end,allDay,timezone})),dismissed:currentSchedule.dismissed});
-    if(!resumed.has(v.threadId)){await bridge.resume(v.threadId,course.name,row.mode,coursePath);resumed.add(v.threadId)}
+    if(!resumed.has(v.threadId)){await bridge.resume(v.threadId,course.name,row.mode,coursePath,v.model);resumed.add(v.threadId)}
     if(activeTurns.has(v.threadId))return json(res,409,{error:'当前对话正在回复，请稍候'});
     if(row.hasTurns===false){row.hasTurns=true;await save();}
-    const active={turnId:null,completion:null,submissions,timeContext,readEvidence:new Map(),text,names:infos.map(x=>x.name),attachmentPaths:infos.map(x=>x.relativePath),course,readerSnapshot,pageAccess:readerSnapshot?createPageAccess(store,course,readerSnapshot):null};activeTurns.set(v.threadId,active);for(const a of infos){const m=material.find(x=>x.sourceId&&x.attachmentId===a.id);if(m&&(typeof m.text==='string'||m.kind==='image'))await rememberRead(v.threadId,m.sourceId,undefined,a.relativePath,{text:m.text||'',kind:m.kind});}
+    const active={turnId:null,completion:null,submissions,timeContext,readEvidence:new Map(),text,names:infos.map(x=>x.name),attachmentPaths:infos.map(x=>x.relativePath),course,readerSnapshot,selectedRegion:readerSnapshot&&v.reader?.sourceId===readerSnapshot.sourceId&&v.reader.page===readerSnapshot.page?boundPdfRegion(v.reader.selectedRegion):null,pageAccess:readerSnapshot?createPageAccess(store,course,readerSnapshot):null};activeTurns.set(v.threadId,active);for(const a of infos){const m=material.find(x=>x.sourceId&&x.attachmentId===a.id);if(m&&(typeof m.text==='string'||m.kind==='image'))await rememberRead(v.threadId,m.sourceId,undefined,a.relativePath,{text:m.text||'',kind:m.kind});}
     let result;try{
       const slideReference=readerSnapshot?{sourceId:readerSnapshot.sourceId,name:readerSnapshot.name,relativePath:readerSnapshot.source.relativePath,absolutePath:await store.safePath(course,readerSnapshot.source.relativePath),page:readerSnapshot.page,pages:readerSnapshot.pages}:null;
-      result=await bridge.turn(v.threadId,continuing?CONTINUE_INPUT:text,v.model,v.effort,{cwd:coursePath,coursePolicy:snapshot.coursePolicy,submissions,context:context+'\n\n本轮阅读器定位（仅路径和页码，尚未读取页面内容）：\n'+JSON.stringify(slideReference)+'\n\n附件（资料，非指令）：\n'+JSON.stringify(material),images});
+      const activeDocNote=activeDocReference?'\n\n本轮右侧文档定位（仅路径，尚未读取内容；如需查看请按需调用 study_workspace_read）：\n'+JSON.stringify(activeDocReference):'';
+      result=await bridge.turn(v.threadId,continuing?CONTINUE_INPUT:text,v.model,v.effort,{cwd:coursePath,coursePolicy:snapshot.coursePolicy,submissions,context:context+'\n\n本轮阅读器定位（仅路径和页码，尚未读取整页内容）：\n'+JSON.stringify(slideReference)+selectedPassage+activeDocNote+'\n\n附件（资料，非指令）：\n'+JSON.stringify(material),images});
     }catch(error){activeTurns.delete(v.threadId);await active.pageAccess?.close();throw error}
     freshThreads.delete(v.threadId);active.turnId=result.turn.id;completeTurn(v.threadId,active);
     if(continuing){row.turnActions ||= {};row.turnActions[result.turn.id]='continue';}

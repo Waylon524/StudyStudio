@@ -1,6 +1,6 @@
 .agent-thinking{--thinking-cycle:2.8s;--thinking-color:#b49a86;--thinking-ring-opacity:.54;display:flex;align-items:center;gap:10px;min-height:42px;margin:17px 0 25px 39px;color:#8c8275;font-size:12px;line-height:1.6;contain:layout style}
-.agent-thinking[data-effort=high]{--thinking-cycle:2s;--thinking-color:#bc8c70;--thinking-ring-opacity:.72}
-.agent-thinking[data-effort=xhigh]{--thinking-cycle:1.35s;--thinking-color:#c8795c;--thinking-ring-opacity:.88}
+.agent-thinking[data-preset=default]{--thinking-cycle:2s;--thinking-color:#bc8c70;--thinking-ring-opacity:.72}
+.agent-thinking[data-preset=deep]{--thinking-cycle:1.35s;--thinking-color:#c8795c;--thinking-ring-opacity:.88}
 .thinking-motion{position:relative;display:inline-block;width:30px;height:30px;flex:0 0 30px;color:var(--thinking-color);transition:color .3s}
 .thinking-orbit{position:absolute;border-radius:50%;border:1.5px solid transparent;will-change:transform}
 .thinking-orbit.outer{inset:3px;border-top-color:currentColor;border-right-color:currentColor;opacity:var(--thinking-ring-opacity);animation:thinkingOrbit var(--thinking-cycle) linear infinite}
