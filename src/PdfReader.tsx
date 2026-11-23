@@ -1,12 +1,15 @@
 /// <reference types="vite/client" />
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import { ChevronLeft, ChevronRight, Download, ListTree, Maximize, Minus, PanelsTopLeft, Plus, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, ListTree, LoaderCircle, Maximize, Minus, PanelsTopLeft, Plus, RefreshCw, X } from 'lucide-react'
 import { resolvePdfDestinationPage, type PdfOutlineItem } from './pdf-navigation'
+import type { PdfOutlineGenerationState, PdfOutlineNode } from '../shared/pdf-outline.mjs'
 import {PdfMarkup,type PdfRegionSelection} from './PdfMarkup'
+import { tCurrent, useI18n } from './i18n'
 export type {PdfRegionSelection} from './PdfMarkup'
 import './pdf-reader.css'
 
@@ -29,6 +32,15 @@ export type PdfReaderProps = {
   keyboardEnabled?:boolean
   annotationReadOnly?:boolean
   annotationUpdates?:{sourceId:string;page:number;revision:number}
+  outlineUpdates?:{sourceId:string;revision:number}
+}
+
+function customNodesToPdfOutline(nodes:readonly PdfOutlineNode[]):PdfOutlineItem[]{
+  return nodes.map(node=>({
+    title:node.title,
+    dest:[Math.max(0,(node.page||1)-1)],
+    items:Array.isArray(node.children)?customNodesToPdfOutline(node.children):[]
+  }))
 }
 
 /** A PDF owns its document, worker, canvases and pending callbacks for one lifetime. */
@@ -37,7 +49,8 @@ export function PdfReader(props:PdfReaderProps) {
 }
 
 /** One canvas per render avoids overlapping PDF.js operations during fast page changes. */
-function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError,onTextSelectionChange,textSelectionReset=0,onAskSelection,onRegionSelectionChange,regionSelection,keyboardEnabled=true,annotationReadOnly=false,annotationUpdates}:PdfReaderProps) {
+function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError,onTextSelectionChange,textSelectionReset=0,onAskSelection,onRegionSelectionChange,regionSelection,keyboardEnabled=true,annotationReadOnly=false,annotationUpdates,outlineUpdates}:PdfReaderProps) {
+  const {locale,t}=useI18n()
   const [document,setDocument] = useState<PDFDocumentProxy|null>(null)
   const [pages,setPages] = useState(0)
   const [width,setWidth] = useState(0)
@@ -51,6 +64,10 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
   const [dragging,setDragging] = useState(false)
   const [navigation,setNavigation] = useState<'thumbnails'|'outline'|null>(null)
   const [outline,setOutline] = useState<PdfOutlineItem[]>([])
+  const [outlineGeneration,setOutlineGeneration] = useState<PdfOutlineGenerationState>({status:'idle',error:null})
+  const [outlinePollTick,setOutlinePollTick] = useState(0)
+  const [confirmRegenerateOpen,setConfirmRegenerateOpen] = useState(false)
+  const regenerateCancelRef = useRef<HTMLButtonElement>(null)
   const readerRef = useRef<HTMLElement>(null)
   const outlineRequest = useRef(0)
   const alive = useRef(true)
@@ -252,7 +269,7 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
       if(safe!==value)callbacks.current.onPageChange(safe)
     }).catch(err=>{
       if(cancelled||!alive.current)return
-      const message='无法打开 PDF，请检查文件是否损坏或需要密码。'
+      const message=tCurrent('pdf.openFailedLegacy')
       setError(message);setLoading(false);callbacks.current.onReaderError?.(message)
       console.warn('PDF reader load failed',err)
     })
@@ -261,14 +278,61 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[courseId,source.id,source.url])
 
+  const outlineRevision=outlineUpdates?.sourceId===source.id?outlineUpdates.revision:0
+  useEffect(()=>{
+    if(outlineGeneration.status!=='generating')return
+    const timer=window.setTimeout(()=>setOutlinePollTick(n=>n+1),1500)
+    return()=>window.clearTimeout(timer)
+  },[outlineGeneration.status,outlinePollTick])
+  useEffect(()=>{
+    if(!confirmRegenerateOpen)return
+    regenerateCancelRef.current?.focus()
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setConfirmRegenerateOpen(false)}
+    }
+    window.document.addEventListener('keydown',onKey,true)
+    return()=>window.document.removeEventListener('keydown',onKey,true)
+  },[confirmRegenerateOpen])
   useEffect(()=>{
     let cancelled=false
-    setOutline([]);setNavigation(null)
-    if(document)void document.getOutline().then(items=>{
-      if(!cancelled&&alive.current)setOutline(Array.isArray(items)?items:[])
-    }).catch(()=>{})
+    if(!document){setOutline([]);setNavigation(null);setOutlineGeneration({status:'idle',error:null});return}
+    ;(async()=>{
+      try{
+        const res=await fetch('/api/courses/'+encodeURIComponent(courseId)+'/pdf-outline?'+new URLSearchParams({sourceId:source.id}))
+        if(!cancelled&&alive.current&&res.ok){
+          const data=await res.json()
+          if(data?.generation&&typeof data.generation==='object'&&['idle','generating','ready','failed'].includes(data.generation.status)){
+            setOutlineGeneration({status:data.generation.status,error:typeof data.generation.error==='string'?data.generation.error:null,requestId:data.generation.requestId??null,updatedAt:data.generation.updatedAt??null})
+          }
+          if(data?.hasCustomOutline&&Array.isArray(data.items)){
+            setOutline(customNodesToPdfOutline(data.items))
+            return
+          }
+        }
+      }catch{}
+      try{
+        const items=await document.getOutline()
+        if(!cancelled&&alive.current)setOutline(Array.isArray(items)?items:[])
+      }catch{
+        if(!cancelled&&alive.current)setOutline([])
+      }
+    })()
     return()=>{cancelled=true}
-  },[document])
+  },[document,courseId,source.id,outlineRevision,outlinePollTick])
+  const regenerateOutline=useCallback(async()=>{
+    setOutlineGeneration({status:'generating',error:null})
+    try{
+      const res=await fetch('/api/courses/'+encodeURIComponent(courseId)+'/pdf-outline',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op:'regenerate',sourceId:source.id,locale})})
+      const data=await res.json().catch(()=>({}))
+      if(!alive.current)return
+      if(!res.ok)throw new Error(data?.error||tCurrent('pdf.regenerateBookmarksFailed'))
+      setOutlineGeneration(data?.generation?.status?{status:data.generation.status,error:data.generation.error??null}:{status:'generating',error:null})
+      setOutlinePollTick(n=>n+1)
+    }catch(reason){
+      if(!alive.current)return
+      setOutlineGeneration({status:'failed',error:reason instanceof Error&&reason.message?reason.message:tCurrent('pdf.regenerateBookmarksFailed')})
+    }
+  },[courseId,source.id,locale])
 
   useEffect(()=>{
     if(!keyboardEnabled||!pages)return
@@ -334,7 +398,7 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
       canvas.width=Math.max(1,Math.floor(viewport.width*outputScale))
       canvas.height=Math.max(1,Math.floor(viewport.height*outputScale))
       canvas.style.width=`${viewport.width}px`;canvas.style.height=`${viewport.height}px`
-      canvas.setAttribute('role','img');canvas.setAttribute('aria-label',`${source.name}，第 ${current} 页`)
+      canvas.setAttribute('role','img');canvas.setAttribute('aria-label',tCurrent('pdf.canvasPageAria',{name:source.name,page:current}))
       const context=canvas.getContext('2d')
       if(!context)throw new Error('canvas unavailable')
       render=pdfPage.render({canvas,canvasContext:context,viewport,transform:[outputScale,0,0,outputScale,0,0]})
@@ -355,7 +419,7 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
       })
     })().catch(err=>{
       if(cancelled||!alive.current||err?.name==='RenderingCancelledException')return
-      const message='这一页无法显示，请尝试重新打开文件。'
+      const message=tCurrent('pdf.renderFailed')
       setError(message);setLoading(false);callbacks.current.onReaderError?.(message)
       console.warn('PDF reader render failed',err)
     })
@@ -407,39 +471,49 @@ function DocumentReader({courseId,source,page,onPageChange,onClose,onReaderError
     setNavigation(value=>value===mode?null:mode)
   }
 
-  return <section className="pdf-reader" ref={readerRef} aria-label={`阅读 ${source.name}`}>
+  return <section className="pdf-reader" ref={readerRef} aria-label={t('pdf.readingAria',{name:source.name})}>
     <header className="pdf-reader-header">
       <strong className="pdf-reader-title" title={source.name}>{source.name}</strong>
-      {onAskSelection&&<button type="button" className="pdf-reader-selection-ask" onPointerDown={event=>event.preventDefault()} onClick={onAskSelection}>{regionSelection?.sourceId===source.id&&regionSelection.page===actualPage?'用选区提问':'用选中文字提问'}</button>}
-      <a className="pdf-reader-icon" href={source.url} download={source.name} aria-label={`下载 ${source.name}`} title={`下载 ${source.name}`}><Download size={17}/></a>
-      <button type="button" className="pdf-reader-icon" onClick={onClose} aria-label="关闭阅读器" title="关闭阅读器"><X size={18}/></button>
+      {onAskSelection&&<button type="button" className="pdf-reader-selection-ask" onPointerDown={event=>event.preventDefault()} onClick={onAskSelection}>{regionSelection?.sourceId===source.id&&regionSelection.page===actualPage?t('pdf.askRegion'):t('pdf.askSelection')}</button>}
+      <a className="pdf-reader-icon" href={source.url} download={source.name} aria-label={t('pdf.downloadNamed',{name:source.name})} title={t('pdf.downloadNamed',{name:source.name})}><Download size={17}/></a>
+      <button type="button" className="pdf-reader-icon" onClick={onClose} aria-label={t('pdf.closeReader')} title={t('pdf.closeReader')}><X size={18}/></button>
     </header>
     <div className="pdf-reader-body">
-      {document&&<ReaderNavigation mode={navigation} document={document} pages={pages} currentPage={actualPage} outline={outline} onNavigate={navigate} onNavigateOutline={navigateOutline}/>}
-    <div className={'pdf-reader-stage' +(dragging?' is-dragging':'')} ref={stageRef} tabIndex={0} aria-label="课件页面" aria-busy={loading} title="拖选文字，空白处或按住 Option 拖动平移；左右键翻页，上下键滚动，滚轮缩放" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
-      {loading && <div className="pdf-reader-status" role="status">正在加载页面…</div>}
+      {document&&<ReaderNavigation mode={navigation} document={document} pages={pages} currentPage={actualPage} outline={outline} outlineGeneration={outlineGeneration} onRequestRegenerateOutline={()=>setConfirmRegenerateOpen(true)} onDismissOutlineError={()=>setOutlineGeneration(prev=>({...prev,error:null}))} onNavigate={navigate} onNavigateOutline={navigateOutline}/>}
+    <div className={'pdf-reader-stage' +(dragging?' is-dragging':'')} ref={stageRef} tabIndex={0} aria-label={t('pdf.stageAria')} aria-busy={loading} title={t('pdf.stageTitle')} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onLostPointerCapture={endDrag}>
+      {loading && <div className="pdf-reader-status" role="status">{t('pdf.loadingPage')}</div>}
       {error && <div className="pdf-reader-status pdf-reader-error" role="alert">{error}</div>}
       <div className="pdf-reader-canvas" hidden={renderedPage===null || !!error} inert={renderedPage!==actualPage} aria-hidden={renderedPage!==actualPage||undefined}><div className="pdf-reader-sheet" ref={sheetRef}><div className="pdf-reader-canvas-host" ref={canvasHostRef}/><div className="pdf-reader-text-layer-host" ref={textLayerHostRef}/></div></div>
     </div>
     </div>
-    <footer className="pdf-reader-footer" aria-label="课件阅读控制">
+    <footer className="pdf-reader-footer" aria-label={t('pdf.controlsAria')}>
       <div className="pdf-reader-navigation-tools">
-        <button type="button" className="pdf-reader-icon" aria-label="页面缩略图" title="页面缩略图" aria-expanded={navigation==='thumbnails'} disabled={!document} onClick={event=>toggleNavigation('thumbnails',event.currentTarget)}><PanelsTopLeft size={16}/></button>
-        {outline.length>0&&<button type="button" className="pdf-reader-icon" aria-label="PDF 目录" title="PDF 目录" aria-expanded={navigation==='outline'} onClick={event=>toggleNavigation('outline',event.currentTarget)}><ListTree size={16}/></button>}
+        <button type="button" className="pdf-reader-icon" aria-label={t('pdf.thumbnails')} title={t('pdf.thumbnails')} aria-expanded={navigation==='thumbnails'} disabled={!document} onClick={event=>toggleNavigation('thumbnails',event.currentTarget)}><PanelsTopLeft size={16}/></button>
+        <button type="button" className="pdf-reader-icon" aria-label={t('pdf.outline')} title={t('pdf.outline')} aria-expanded={navigation==='outline'} disabled={!document} onClick={event=>toggleNavigation('outline',event.currentTarget)}><ListTree size={16}/></button>
       </div>
       <div className="pdf-reader-pagination">
-        <button type="button" className="pdf-reader-icon" disabled={!pages||actualPage<=1} onClick={()=>navigate(actualPage-1)} aria-label="上一页" title="上一页"><ChevronLeft size={17}/></button>
-        <form onSubmit={submitPage} className="pdf-reader-page-form" style={{'--pdf-page-number-width':String(pages||1).length+'ch'} as CSSProperties}><label htmlFor="pdf-reader-page">第</label><input id="pdf-reader-page" aria-label="页码" type="number" inputMode="numeric" min={1} max={pages||1} disabled={!pages} value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>setDraft(String(actualPage))}/><span>/ {pages||'–'}<span className="pdf-reader-page-unit"> 页</span></span></form>
-        <button type="button" className="pdf-reader-icon" disabled={!pages||actualPage>=pages} onClick={()=>navigate(actualPage+1)} aria-label="下一页" title="下一页"><ChevronRight size={17}/></button>
+        <button type="button" className="pdf-reader-icon" disabled={!pages||actualPage<=1} onClick={()=>navigate(actualPage-1)} aria-label={t('pdf.prevPage')} title={t('pdf.prevPage')}><ChevronLeft size={17}/></button>
+        <form onSubmit={submitPage} className="pdf-reader-page-form" style={{'--pdf-page-number-width':String(pages||1).length+'ch'} as CSSProperties}><label htmlFor="pdf-reader-page">{t('pdf.pagePrefix')}</label><input id="pdf-reader-page" aria-label={t('pdf.pageInputAria')} type="number" inputMode="numeric" min={1} max={pages||1} disabled={!pages} value={draft} onChange={e=>setDraft(e.target.value)} onBlur={()=>setDraft(String(actualPage))}/><span>/ {pages||'–'}<span className="pdf-reader-page-unit">{t('pdf.pageUnit')}</span></span></form>
+        <button type="button" className="pdf-reader-icon" disabled={!pages||actualPage>=pages} onClick={()=>navigate(actualPage+1)} aria-label={t('pdf.nextPage')} title={t('pdf.nextPage')}><ChevronRight size={17}/></button>
       </div>
     <PdfMarkup key={source.id+':'+actualPage} courseId={courseId} sourceId={source.id} page={actualPage} readOnly={annotationReadOnly} refreshRevision={annotationUpdates?.sourceId===source.id&&annotationUpdates.page===actualPage?annotationUpdates.revision:undefined} enabled={renderedPage===actualPage&&!error&&pageSize?.page===actualPage} pageSize={pageSize?.page===actualPage?pageSize:null} sheetRef={sheetRef} regionSelection={regionSelection} onRegionSelectionChange={onRegionSelectionChange}/>
       <div className="pdf-reader-zoom">
-        <button type="button" className="pdf-reader-icon" onClick={()=>changeZoom(-.1)} disabled={!document||zoom<=.5} aria-label="缩小" title="缩小"><Minus size={16}/></button>
-        <span aria-label={`缩放 ${Math.round(zoom*100)}%`}>{Math.round(zoom*100)}%</span>
-        <button type="button" className="pdf-reader-icon" onClick={()=>changeZoom(.1)} disabled={!document||zoom>=3} aria-label="放大" title="放大"><Plus size={16}/></button>
-        <button type="button" className="pdf-reader-icon" onClick={()=>updateZoom(1)} disabled={!document} aria-label="适合宽度" title="适合宽度"><Maximize size={15}/></button>
+        <button type="button" className="pdf-reader-icon" onClick={()=>changeZoom(-.1)} disabled={!document||zoom<=.5} aria-label={t('pdf.zoomOut')} title={t('pdf.zoomOut')}><Minus size={16}/></button>
+        <span aria-label={t('pdf.zoomLevel',{percent:Math.round(zoom*100)})}>{Math.round(zoom*100)}%</span>
+        <button type="button" className="pdf-reader-icon" onClick={()=>changeZoom(.1)} disabled={!document||zoom>=3} aria-label={t('pdf.zoomIn')} title={t('pdf.zoomIn')}><Plus size={16}/></button>
+        <button type="button" className="pdf-reader-icon" onClick={()=>updateZoom(1)} disabled={!document} aria-label={t('pdf.fitWidth')} title={t('pdf.fitWidth')}><Maximize size={15}/></button>
       </div>
     </footer>
+    {confirmRegenerateOpen&&createPortal(<div className="pdf-outline-confirm-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setConfirmRegenerateOpen(false)}}>
+      <div className="pdf-outline-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="pdf-outline-confirm-title" aria-describedby="pdf-outline-confirm-desc">
+        <h2 id="pdf-outline-confirm-title">{t('pdf.regenerateBookmarksConfirmTitle')}</h2>
+        <p id="pdf-outline-confirm-desc">{t('pdf.regenerateBookmarksConfirmBody',{name:source.name})}</p>
+        <div className="pdf-outline-confirm-actions">
+          <button ref={regenerateCancelRef} type="button" className="pdf-outline-confirm-cancel" onClick={()=>setConfirmRegenerateOpen(false)}>{t('app.cancel')}</button>
+          <button type="button" className="pdf-outline-confirm-primary" disabled={outlineGeneration.status==='generating'} onClick={()=>{setConfirmRegenerateOpen(false);void regenerateOutline()}}>{t('pdf.regenerateBookmarksConfirmAction')}</button>
+        </div>
+      </div>
+    </div>,window.document.body)}
   </section>
 }
 
@@ -473,14 +547,22 @@ function useReaderPresence(open:boolean,reduced:boolean,animateMount=false){
   return {present,visible}
 }
 type NavigationMode='thumbnails'|'outline'|null
-function ReaderNavigation({mode,document,pages,currentPage,outline,onNavigate,onNavigateOutline}:{mode:NavigationMode;document:PDFDocumentProxy;pages:number;currentPage:number;outline:PdfOutlineItem[];onNavigate:(page:number)=>void;onNavigateOutline:(destination:PdfOutlineItem['dest'])=>void}){
+function ReaderNavigation({mode,document,pages,currentPage,outline,outlineGeneration,onRequestRegenerateOutline,onDismissOutlineError,onNavigate,onNavigateOutline}:{mode:NavigationMode;document:PDFDocumentProxy;pages:number;currentPage:number;outline:PdfOutlineItem[];outlineGeneration:PdfOutlineGenerationState;onRequestRegenerateOutline:()=>void;onDismissOutlineError:()=>void;onNavigate:(page:number)=>void;onNavigateOutline:(destination:PdfOutlineItem['dest'])=>void}){
+  const {t}=useI18n()
   const reduced=useReducedReaderMotion(),open=mode!==null,{present,visible}=useReaderPresence(open,reduced),lastMode=useRef(mode)
   if(mode)lastMode.current=mode
   if(!present)return null
-  return <aside className={'pdf-reader-navigation'+(visible?' is-open':'')} aria-label={lastMode.current==='thumbnails'?'页面缩略图':'PDF 目录'} aria-hidden={!open||undefined} inert={!open}>
+  const generating=outlineGeneration.status==='generating'
+  return <aside className={'pdf-reader-navigation'+(visible?' is-open':'')} aria-label={lastMode.current==='thumbnails'?t('pdf.thumbnails'):t('pdf.outline')} aria-hidden={!open||undefined} inert={!open}>
     <div className="pdf-reader-navigation-content">
       <NavigationPane open={mode==='thumbnails'} reduced={reduced} mode="thumbnails"><PageThumbnails document={document} pages={pages} currentPage={currentPage} active={mode==='thumbnails'} onNavigate={onNavigate}/></NavigationPane>
-      <NavigationPane open={mode==='outline'} reduced={reduced} mode="outline"><nav className="pdf-reader-outline" aria-label="PDF 目录条目"><OutlineItems items={outline} onNavigate={onNavigateOutline} reduced={reduced}/></nav></NavigationPane>
+      <NavigationPane open={mode==='outline'} reduced={reduced} mode="outline"><div className="pdf-reader-outline-shell">
+        <div className="pdf-reader-outline-top">
+          <button type="button" className="pdf-reader-outline-regenerate-btn" disabled={generating} aria-busy={generating||undefined} onClick={onRequestRegenerateOutline}>{generating?<LoaderCircle size={12} className="pdf-reader-outline-spinner"/>:<RefreshCw size={12}/>}<span>{generating?t('pdf.regeneratingBookmarks'):t('pdf.regenerateBookmarks')}</span></button>
+          {outlineGeneration.status==='failed'&&outlineGeneration.error&&<div className="pdf-reader-outline-error" role="status"><span>{outlineGeneration.error}</span><button type="button" aria-label={t('pdf.dismissOutlineError')} onClick={onDismissOutlineError}><X size={11}/></button></div>}
+        </div>
+        <nav className="pdf-reader-outline" aria-label={t('pdf.outlineItemsAria')}>{outline.length>0?<OutlineItems items={outline} onNavigate={onNavigateOutline} reduced={reduced}/>:<p className="pdf-reader-outline-empty">{t('pdf.outlineEmpty')}</p>}</nav>
+      </div></NavigationPane>
     </div>
   </aside>
 }
@@ -516,7 +598,7 @@ function PageThumbnails({document,pages,currentPage,active,onNavigate}:{document
     if(active)root.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView({block:'nearest',inline:'nearest',behavior:'instant'})
   },[currentPage,active])
   return <div className="pdf-reader-thumbnails" ref={root}>
-    {Array.from({length:pages},(_,index)=>index+1).map(page=><button key={page} type="button" className="pdf-reader-thumbnail" data-page={page} aria-label={`转到第 ${page} 页`} aria-current={page===currentPage?'page':undefined} onClick={()=>onNavigate(page)}><Thumbnail document={document} page={page} visible={visible.has(page)}/><span>{page}</span></button>)}
+    {Array.from({length:pages},(_,index)=>index+1).map(page=><button key={page} type="button" className="pdf-reader-thumbnail" data-page={page} aria-label={tCurrent('pdf.goToPage',{page})} aria-current={page===currentPage?'page':undefined} onClick={()=>onNavigate(page)}><Thumbnail document={document} page={page} visible={visible.has(page)}/><span>{page}</span></button>)}
   </div>
 }
 
@@ -554,11 +636,12 @@ function OutlineItems({items,onNavigate,reduced,depth=0}:{items:PdfOutlineItem[]
   return <ul>{items.map((item,index)=><OutlineBranch key={index} item={item} onNavigate={onNavigate} reduced={reduced} depth={depth}/>)}</ul>
 }
 function OutlineBranch({item,onNavigate,reduced,depth}:{item:PdfOutlineItem;onNavigate:(destination:PdfOutlineItem['dest'])=>void;reduced:boolean;depth:number}){
+  const {t}=useI18n()
   const [expanded,setExpanded]=useState(depth===0),childrenId=useId()
   const children=Array.isArray(item.items)?item.items:[]
   return <li><div className="pdf-reader-outline-row">
-    {children.length>0?<button type="button" className="pdf-reader-outline-toggle" aria-label={`${expanded?'收起':'展开'} ${item.title}`} aria-expanded={expanded} aria-controls={childrenId} onClick={()=>setExpanded(value=>!value)}><ChevronRight size={13} className={expanded?'is-expanded':undefined}/></button>:<span className="pdf-reader-outline-spacer"/>}
-    <button type="button" className="pdf-reader-outline-link" disabled={!item.dest} onClick={()=>onNavigate(item.dest)} title={item.title}>{item.title||'未命名书签'}</button>
+    {children.length>0?<button type="button" className="pdf-reader-outline-toggle" aria-label={expanded?t('pdf.collapseBookmark',{title:item.title}):t('pdf.expandBookmark',{title:item.title})} aria-expanded={expanded} aria-controls={childrenId} onClick={()=>setExpanded(value=>!value)}><ChevronRight size={13} className={expanded?'is-expanded':undefined}/></button>:<span className="pdf-reader-outline-spacer"/>}
+    <button type="button" className="pdf-reader-outline-link" disabled={!item.dest} onClick={()=>onNavigate(item.dest)} title={item.title}>{item.title||t('pdf.unnamedBookmark')}</button>
   </div>{children.length>0&&<OutlineChildren open={expanded} reduced={reduced} id={childrenId}><OutlineItems items={children} onNavigate={onNavigate} reduced={reduced} depth={depth+1}/></OutlineChildren>}</li>
 }
 function OutlineChildren({open,reduced,id,children}:{open:boolean;reduced:boolean;id:string;children:ReactNode}){

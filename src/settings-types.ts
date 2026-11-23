@@ -1,4 +1,5 @@
 import type {ThinkingPresetConfigs} from '../shared/model-presets.mjs'
+import type {Locale} from '../shared/i18n.mjs'
 
 export type CatalogEffort={
  reasoningEffort:string
@@ -19,6 +20,7 @@ export type CourseStats={
  coursewareCount:number
  materialCount:number
  fileCount:number
+ questionCount?:number
  totalBytes:number
  workspacePath:string
 }
@@ -62,6 +64,7 @@ export type SettingsInfo={
  maxMaterialLabel:string
  presets?:ThinkingPresetConfigs
  defaultPresets?:ThinkingPresetConfigs
+ locale?:Locale|null
 }
 
 export function formatBytes(size?:number):string{
@@ -72,14 +75,14 @@ export function formatBytes(size?:number):string{
  return (size/1024/1024/1024).toFixed(2)+' GB'
 }
 
-export function formatShortDate(iso?:string|null):string{
+export function formatShortDate(iso?:string|null,locale:string='zh-CN'):string{
  if(!iso)return ''
  const ms=Date.parse(iso)
  if(!Number.isFinite(ms))return ''
  const date=new Date(ms),now=new Date()
  const sameYear=date.getFullYear()===now.getFullYear()
  try{
-  return new Intl.DateTimeFormat('zh-CN',sameYear?{month:'short',day:'numeric'}:{year:'numeric',month:'short',day:'numeric'}).format(date)
+  return new Intl.DateTimeFormat(locale,sameYear?{month:'short',day:'numeric'}:{year:'numeric',month:'short',day:'numeric'}).format(date)
  }catch{
   return iso.slice(0,10)
  }

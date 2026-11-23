@@ -6,6 +6,7 @@ import {
  Search,Sparkles,Trash2,Upload,X
 } from 'lucide-react'
 import {CourseAvatar} from './CourseAvatar'
+import {tCurrent,useI18n} from './i18n'
 import {formatBytes,formatShortDate,type ManagedCourse,type ManagedFolder,type ManagedSource} from './settings-types'
 import {isEpubSource,isHtmlSource,isImageSource,isMarkdownSource,isPdfSource,isReadableCoursewareSource,isSlidesSource,isSpreadsheetSource} from './source-types'
 
@@ -28,12 +29,11 @@ type Props={
 }
 
 const STANDARD_CATEGORIES=['课件','教材','作业','笔记','课程说明','图片','其他资料']
-const collator=new Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})
 
 async function apiJson(path:string,body?:unknown,signal?:AbortSignal){
  const res=await fetch(path,body===undefined?{signal}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal})
  const value=await res.json()
- if(!res.ok)throw new Error(value.error||'操作未能完成，请重试。')
+ if(!res.ok)throw new Error(value.error||tCurrent('app.operationFailed'))
  return value
 }
 
@@ -64,14 +64,11 @@ function fileBadge(source:ManagedSource){
  return {kind:'doc',icon:<FileText size={16}/>}
 }
 
-function folderLabel(path:string){
- return path?path.split('/').join(' / '):'未分类'
-}
-
 export function SettingsMaterials({
  courses,selectedCourseId,onSelectCourse,activeCourseId,currentSourceId,conversationBusy,
  revision,onChanged,onOpenSource,onSourcesDeleted,onSourceRenamed
 }:Props){
+ const {locale,t,collator,courseDisplayName,folderDisplayName}=useI18n()
  const [sources,setSources]=useState<ManagedSource[]>([])
  const [folders,setFolders]=useState<ManagedFolder[]>([])
  const [pendingImports,setPendingImports]=useState<PendingImport[]>([])
@@ -121,6 +118,7 @@ export function SettingsMaterials({
  const base='/api/courses/'+encodeURIComponent(selectedCourseId)
  const courseLocked=conversationBusy&&selectedCourseId===activeCourseId
  const selectedCourse=courses.find(c=>c.id===selectedCourseId)
+ const selectedCourseLabel=selectedCourse?courseDisplayName(selectedCourse):t('sm.currentCourse')
 
  useEffect(()=>{
   activeCourseRef.current=selectedCourseId
@@ -218,9 +216,9 @@ export function SettingsMaterials({
   return [...set].sort((a,b)=>{
    if(a==='课件')return -1
    if(b==='课件')return 1
-   return collator.compare(a,b)
+   return collator.compare(folderDisplayName(a),folderDisplayName(b))
   })
- },[folders,sources])
+ },[folders,sources,collator,folderDisplayName])
 
  const moveTargetOptions=useMemo(()=>{
   const set=new Set<string>(['',...STANDARD_CATEGORIES,...existingFolders])
@@ -229,9 +227,9 @@ export function SettingsMaterials({
    if(!b)return 1
    if(a==='课件')return -1
    if(b==='课件')return 1
-   return collator.compare(a,b)
+   return collator.compare(folderDisplayName(a),folderDisplayName(b))
   })
- },[existingFolders])
+ },[existingFolders,collator,folderDisplayName])
 
  useEffect(()=>{
   if(folderFilter!=='__all__'&&folderFilter!=='__root__'&&!existingFolders.includes(folderFilter)){
@@ -246,7 +244,7 @@ export function SettingsMaterials({
    if(typeFilter==='material'&&isReadableCourseware(source))return false
    if(folderFilter==='__root__'&&source.folder)return false
    if(folderFilter!=='__all__'&&folderFilter!=='__root__'&&source.folder!==folderFilter)return false
-   if(q&&!source.name.toLowerCase().includes(q)&&!source.folder.toLowerCase().includes(q)&&!source.relativePath.toLowerCase().includes(q))return false
+   if(q&&!source.name.toLowerCase().includes(q)&&!source.folder.toLowerCase().includes(q)&&!folderDisplayName(source.folder).toLowerCase().includes(q)&&!source.relativePath.toLowerCase().includes(q))return false
    return true
   })
   return filtered.sort((a,b)=>{
@@ -258,7 +256,7 @@ export function SettingsMaterials({
    }
    return collator.compare(a.name,b.name)||collator.compare(a.relativePath,b.relativePath)
   })
- },[sources,typeFilter,folderFilter,query,sortBy])
+ },[sources,typeFilter,folderFilter,query,sortBy,collator,folderDisplayName])
 
  const visibleIds=useMemo(()=>visibleSources.map(s=>s.id),[visibleSources])
  const selectedVisibleCount=useMemo(()=>visibleIds.filter(id=>selectedIds.has(id)).length,[visibleIds,selectedIds])
@@ -302,14 +300,14 @@ export function SettingsMaterials({
   try{
    for(let i=0;i<list.length;i++){
     const file=list[i]
-    setUploadStatus(`正在上传 ${i+1} / ${list.length}：${file.name}`)
+    setUploadStatus(t('sm.uploadingProgress',{current:i+1,total:list.length,name:file.name}))
     try{
      if(mode==='courseware'){
       if(!/\.pdf$/i.test(file.name)||!/^%PDF-[0-9]\.[0-9][\t\n\f\r ]/.test(await file.slice(0,9).text())){
        skipped.push(file.name);continue
       }
      }
-     if(file.size>MAX_MATERIAL_BYTES)throw new Error(`${file.name} 超过 ${MATERIAL_SIZE_LABEL}`)
+     if(file.size>MAX_MATERIAL_BYTES)throw new Error(t('composer.fileTooLarge',{name:file.name,limit:MATERIAL_SIZE_LABEL}))
      const headers:Record<string,string>={
       'Content-Type':file.type||'application/octet-stream',
       'x-file-name':encodeURIComponent(file.name)
@@ -324,11 +322,11 @@ export function SettingsMaterials({
      }
      const response=await fetch('/api/courses/'+encodeURIComponent(targetCourse)+'/attachments',{method:'POST',headers,body:file})
      const value=await response.json()
-     if(!response.ok)throw new Error(value.error||'上传失败')
+     if(!response.ok)throw new Error(value.error||t('composer.uploadFailed'))
      uploadedCount++
      if(mode==='material'&&directFolder===null)addedForAutoOrg.push(value.attachment.id)
     }catch(err:any){
-     setError(err.message||'部分文件上传失败。')
+     setError(err.message||t('sm.uploadPartialFailed'))
     }
    }
    if(addedForAutoOrg.length&&activeCourseRef.current===targetCourse){
@@ -337,15 +335,15 @@ export function SettingsMaterials({
       await apiJson('/api/courses/'+encodeURIComponent(targetCourse)+'/imports',{attachmentIds:addedForAutoOrg.slice(offset,offset+100)})
      }
     }catch(err:any){
-     setError('资料已保存，自动整理尚未启动：'+err.message)
+     setError(t('composer.autoOrgNotStarted',{reason:err.message}))
     }
    }
    if(activeCourseRef.current===targetCourse){
     if(skipped.length){
-     setError(`以下文件不是有效的 PDF，未添加到课件：${skipped.join('、')}`)
+     setError(t('sm.invalidPdfSkipped',{names:skipped.join(', ')}))
     }
     if(uploadedCount>0){
-     setNotice(mode==='courseware'?`已上传 ${uploadedCount} 份课件`:directFolder!==null?`已上传 ${uploadedCount} 份文件到「${folderLabel(directFolder)}」`:`已上传 ${uploadedCount} 份资料，正在自动整理`)
+     setNotice(mode==='courseware'?t('sm.uploadedCourseware',{count:uploadedCount}):directFolder!==null?t('sm.uploadedToFolder',{count:uploadedCount,folder:folderDisplayName(directFolder)}):t('sm.uploadedAutoOrg',{count:uploadedCount}))
      reload()
     }
    }
@@ -378,10 +376,10 @@ export function SettingsMaterials({
    const result=await apiJson(base+'/sources/rename',{sourceId:source.id,name:nextName})
    setRenamingId(null)
    if(result.source)onSourceRenamed?.(selectedCourseId,result.source)
-   setNotice(`已重命名为「${nextName}」`)
+   setNotice(t('sm.noticeRenamed',{name:nextName}))
    reload()
   }catch(err:any){
-   setError(err.message||'重命名失败。')
+   setError(err.message||t('sm.errRename'))
   }finally{
    setBusyKey(null)
   }
@@ -392,10 +390,10 @@ export function SettingsMaterials({
   try{
    await apiJson(base+'/sources/move',{sourceId:source.id,folder,requirePdf})
    setMovingId(null);setMoveNewFolderOpen(false);setMoveNewFolderName('')
-   setNotice(folder==='课件'&&requirePdf?`已将「${source.name}」设为课件`:`已移动到「${folderLabel(folder)}」`)
+   setNotice(folder==='课件'&&requirePdf?t('sm.noticePromoted',{name:source.name}):t('sm.noticeMoved',{folder:folderDisplayName(folder)}))
    reload()
   }catch(err:any){
-   setError(err.message||'移动失败。')
+   setError(err.message||t('sm.errMove'))
   }finally{
    setBusyKey(null)
   }
@@ -405,16 +403,16 @@ export function SettingsMaterials({
   event.preventDefault()
   const name=moveNewFolderName.trim()
   if(!name)return
-  if(/[\\/]/.test(name)||name==='.'||name==='..'||name.startsWith('.')){setError('分类名称不能包含斜杠或以点开头。');return}
+  if(/[\\/]/.test(name)||name==='.'||name==='..'||name.startsWith('.')){setError(t('sm.errBadCategoryName'));return}
   setBusyKey('move:'+source.id);setError('');setNotice('')
   try{
    await apiJson(base+'/folders',{path:name})
    await apiJson(base+'/sources/move',{sourceId:source.id,folder:name})
    setMovingId(null);setMoveNewFolderOpen(false);setMoveNewFolderName('')
-   setNotice(`已新建分类「${name}」并移入文件`)
+   setNotice(t('sm.noticeCreatedAndMoved',{name}))
    reload()
   }catch(err:any){
-   setError(err.message||'新建分类并移动失败。')
+   setError(err.message||t('sm.errCreateMove'))
   }finally{
    setBusyKey(null)
   }
@@ -427,10 +425,10 @@ export function SettingsMaterials({
    setConfirmDeleteId(null)
    setSelectedIds(prev=>{const next=new Set(prev);next.delete(source.id);return next})
    onSourcesDeleted?.(selectedCourseId,result.deletedIds||[source.id],result.attachmentIds||[])
-   setNotice(`已删除「${source.name}」`)
+   setNotice(t('sm.noticeDeleted',{name:source.name}))
    reload()
   }catch(err:any){
-   setError(err.message||'删除失败。')
+   setError(err.message||t('sm.errDelete'))
   }finally{
    setBusyKey(null)
   }
@@ -443,10 +441,10 @@ export function SettingsMaterials({
   try{
    await apiJson(base+'/sources/move-batch',{sourceIds:ids,folder,requirePdf})
    setSelectedIds(new Set());setConfirmBatchDelete(false)
-   setNotice(requirePdf?`已将 ${ids.length} 份 PDF 设为课件`:`已将 ${ids.length} 份文件移动到「${folderLabel(folder)}」`)
+   setNotice(requirePdf?t('sm.noticeBatchPromoted',{count:ids.length}):t('sm.noticeBatchMoved',{count:ids.length,folder:folderDisplayName(folder)}))
    reload()
   }catch(err:any){
-   setError(err.message||'批量移动失败。')
+   setError(err.message||t('sm.errBatchMove'))
   }finally{
    setBusyKey(null)
   }
@@ -460,10 +458,10 @@ export function SettingsMaterials({
    const result=await apiJson(base+'/sources/delete',{sourceIds:ids})
    setSelectedIds(new Set());setConfirmBatchDelete(false)
    onSourcesDeleted?.(selectedCourseId,result.deletedIds||ids,result.attachmentIds||[])
-   setNotice(`已删除 ${(result.deletedIds||ids).length} 份文件`)
+   setNotice(t('sm.noticeBatchDeleted',{count:(result.deletedIds||ids).length}))
    reload()
   }catch(err:any){
-   setError(err.message||'批量删除失败。')
+   setError(err.message||t('sm.errBatchDelete'))
   }finally{
    setBusyKey(null)
   }
@@ -473,16 +471,16 @@ export function SettingsMaterials({
   event.preventDefault()
   const name=newFolderInput.trim()
   if(!name)return
-  if(/[\\/]/.test(name)||name==='.'||name==='..'||name.startsWith('.')){setError('分类名称不能包含斜杠或以点开头。');return}
+  if(/[\\/]/.test(name)||name==='.'||name==='..'||name.startsWith('.')){setError(t('sm.errBadCategoryName'));return}
   setBusyKey('folder-create');setError('');setNotice('')
   try{
    await apiJson(base+'/folders',{path:name})
    setCreatingFolder(false);setNewFolderInput('')
    setFolderFilter(name)
-   setNotice(`已新建分类「${name}」`)
+   setNotice(t('sm.noticeCategoryCreated',{name}))
    reload()
   }catch(err:any){
-   setError(err.message||'新建分类失败。')
+   setError(err.message||t('sm.errCreateCategory'))
   }finally{
    setBusyKey(null)
   }
@@ -493,7 +491,7 @@ export function SettingsMaterials({
   if(!renamingFolder)return
   const leaf=renameFolderInput.trim()
   if(!leaf){setRenamingFolder(null);return}
-  if(/[\\/]/.test(leaf)||leaf==='.'||leaf==='..'||leaf.startsWith('.')){setError('分类名称不能包含斜杠或以点开头。');return}
+  if(/[\\/]/.test(leaf)||leaf==='.'||leaf==='..'||leaf.startsWith('.')){setError(t('sm.errBadCategoryName'));return}
   const parent=renamingFolder.includes('/')?renamingFolder.slice(0,renamingFolder.lastIndexOf('/')):''
   const nextPath=parent?`${parent}/${leaf}`:leaf
   if(nextPath===renamingFolder){setRenamingFolder(null);return}
@@ -501,10 +499,10 @@ export function SettingsMaterials({
   try{
    await apiJson(base+'/folders/rename',{path:renamingFolder,newPath:nextPath})
    setRenamingFolder(null);setFolderFilter(nextPath)
-   setNotice(`分类已重命名为「${folderLabel(nextPath)}」`)
+   setNotice(t('sm.noticeCategoryRenamed',{name:folderDisplayName(nextPath)}))
    reload()
   }catch(err:any){
-   setError(err.message||'重命名分类失败。')
+   setError(err.message||t('sm.errRenameCategory'))
   }finally{
    setBusyKey(null)
   }
@@ -515,10 +513,10 @@ export function SettingsMaterials({
   try{
    await apiJson(base+'/folders/delete',{path})
    setConfirmDeleteFolder(null);setFolderFilter('__all__')
-   setNotice(`已删除空分类「${folderLabel(path)}」`)
+   setNotice(t('sm.noticeCategoryDeleted',{name:folderDisplayName(path)}))
    reload()
   }catch(err:any){
-   setError(err.message||'删除分类失败。')
+   setError(err.message||t('sm.errDeleteCategory'))
   }finally{
    setBusyKey(null)
   }
@@ -533,7 +531,7 @@ export function SettingsMaterials({
    }
    reload()
   }catch(err:any){
-   setError(err.message||'重试整理失败。')
+   setError(err.message||t('sm.errRetryImports'))
   }finally{
    setBusyKey(null)
   }
@@ -544,10 +542,10 @@ export function SettingsMaterials({
  }
 
  const dropHint=typeFilter==='courseware'||folderFilter==='课件'
-  ?`松开上传为「${selectedCourse?.name||'当前课程'}」的 PDF 课件`
+  ?t('sm.dropCourseware',{course:selectedCourseLabel})
   :folderFilter!=='__all__'
-   ?`松开上传到「${folderFilter==='__root__'?'未分类':folderLabel(folderFilter)}」`
-   :`松开上传到「${selectedCourse?.name||'当前课程'}」并自动整理`
+   ?t('sm.dropFolder',{folder:folderFilter==='__root__'?t('folder.uncategorized'):folderDisplayName(folderFilter)})
+   :t('sm.dropAutoOrg',{course:selectedCourseLabel})
 
  return <div
   className={'sm-root'+(dragging?' is-dragging':'')}
@@ -555,12 +553,12 @@ export function SettingsMaterials({
   onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setDragging(false)}}
   onDrop={handleDrop}
  >
-  <input ref={coursewareInput} type="file" accept=".pdf,application/pdf" multiple className="sr-only" aria-label="上传 PDF 课件" onChange={event=>void uploadFiles(event.target.files,'courseware')}/>
-  <input ref={materialInput} type="file" multiple className="sr-only" aria-label="上传课程资料" onChange={event=>void uploadFiles(event.target.files,'material')}/>
+  <input ref={coursewareInput} type="file" accept=".pdf,application/pdf" multiple className="sr-only" aria-label={t('sm.uploadCoursewareAria')} onChange={event=>void uploadFiles(event.target.files,'courseware')}/>
+  <input ref={materialInput} type="file" multiple className="sr-only" aria-label={t('sm.uploadMaterialsAria')} onChange={event=>void uploadFiles(event.target.files,'material')}/>
 
-  {dragging&&<div className="sm-drop-overlay" aria-hidden="true"><Upload size={26}/><strong>{dropHint}</strong><span>单个文件最大 {MATERIAL_SIZE_LABEL}</span></div>}
+  {dragging&&<div className="sm-drop-overlay" aria-hidden="true"><Upload size={26}/><strong>{dropHint}</strong><span>{t('sm.maxFileSize',{limit:MATERIAL_SIZE_LABEL})}</span></div>}
 
-  <div className="sm-course-strip" role="tablist" aria-label="选择要管理的课程">
+  <div className="sm-course-strip" role="tablist" aria-label={t('sm.selectCourseAria')}>
    {courses.map(course=>{
     const selected=course.id===selectedCourseId
     return <button
@@ -572,43 +570,43 @@ export function SettingsMaterials({
      onClick={()=>onSelectCourse(course.id)}
     >
      <CourseAvatar courseId={course.id} size={18} interactive={false}/>
-     <span>{course.name}</span>
-     {course.id===activeCourseId&&<em className="sm-pill-dot" title="当前所在课程"/>}
+     <span>{courseDisplayName(course)}</span>
+     {course.id===activeCourseId&&<em className="sm-pill-dot" title={t('settings.currentCourseDot')}/>}
     </button>
    })}
   </div>
 
   <div className="sm-overview-bar">
    <div className="sm-metrics">
-    <span className="sm-metric"><strong>{counts.courseware}</strong> 份课件</span>
+    <span className="sm-metric"><strong>{counts.courseware}</strong> {t('sm.metricCourseware',{count:''}).trim()}</span>
     <span className="sm-metric-sep" aria-hidden="true">·</span>
-    <span className="sm-metric"><strong>{counts.material}</strong> 份资料</span>
+    <span className="sm-metric"><strong>{counts.material}</strong> {t('sm.metricMaterials',{count:''}).trim()}</span>
     <span className="sm-metric-sep" aria-hidden="true">·</span>
     <span className="sm-metric sm-tabular">{formatBytes(counts.totalBytes)}</span>
    </div>
    <div className="sm-upload-actions">
     <button type="button" className="settings-btn-accent" disabled={uploading||!!busyKey} onClick={()=>coursewareInput.current?.click()}>
-     <Presentation size={14}/>上传课件
+     <Presentation size={14}/>{t('sm.uploadCourseware')}
     </button>
     <button type="button" className="settings-btn-secondary" disabled={uploading||!!busyKey} onClick={()=>materialInput.current?.click()}>
-     <Upload size={14}/>{folderFilter!=='__all__'&&folderFilter!=='课件'?`上传到「${folderFilter==='__root__'?'未分类':folderLabel(folderFilter)}」`:'上传资料'}
+     <Upload size={14}/>{folderFilter!=='__all__'&&folderFilter!=='课件'?t('sm.uploadToFolder',{folder:folderFilter==='__root__'?t('folder.uncategorized'):folderDisplayName(folderFilter)}):t('sm.uploadMaterials')}
     </button>
    </div>
   </div>
 
-  {uploading&&<div className="sm-banner is-info" role="status"><span className="spinner"/><span>{uploadStatus||'正在上传文件…'}</span></div>}
+  {uploading&&<div className="sm-banner is-info" role="status"><span className="spinner"/><span>{uploadStatus||t('sm.uploadingDefault')}</span></div>}
 
   {activeImportIds.length>0?<div className="sm-banner is-info" role="status">
-   <span className="spinner"/><span>正在后台智能整理 {activeImportIds.length} 份新上传的资料…</span>
+   <span className="spinner"/><span>{t('sm.bgOrganizing',{count:activeImportIds.length})}</span>
   </div>:pendingImports.length>0&&<div className="sm-banner is-warn" role="status">
    <div className="sm-banner-head">
     <Sparkles size={14}/>
     <button type="button" className="sm-banner-toggle" aria-expanded={showPendingDetails} onClick={()=>setShowPendingDetails(v=>!v)}>
-     <span>{pendingImports.length} 份资料待确认分类</span>
+     <span>{t('sm.pendingConfirm',{count:pendingImports.length})}</span>
      <ChevronDown size={13} className={showPendingDetails?'is-rotated':''}/>
     </button>
     <button type="button" className="sm-banner-action" disabled={!!busyKey} onClick={()=>void retryPendingImports()}>
-     <RefreshCw size={12}/>{busyKey==='retry-imports'?'正在整理…':'重新智能整理'}
+     <RefreshCw size={12}/>{busyKey==='retry-imports'?t('sm.reorganizing'):t('sm.reorganize')}
     </button>
    </div>
    {showPendingDetails&&<ul className="sm-pending-list">
@@ -620,25 +618,25 @@ export function SettingsMaterials({
        <span>{item.reason}</span>
       </div>
       {matched&&<div className="sm-pending-controls">
-       <select aria-label={`为《${matched.name}》选择分类`} value={matched.folder||''} disabled={!!busyKey} onChange={event=>void moveSingle(matched,event.target.value)}>
-        {moveTargetOptions.map(path=><option key={path} value={path}>{folderLabel(path)}</option>)}
+       <select aria-label={t('sm.chooseCategoryFor',{name:matched.name})} value={matched.folder||''} disabled={!!busyKey} onChange={event=>void moveSingle(matched,event.target.value)}>
+        {moveTargetOptions.map(path=><option key={path} value={path}>{folderDisplayName(path)}</option>)}
        </select>
-       <button type="button" disabled={!!busyKey} onClick={()=>void moveSingle(matched,matched.folder||'')}>确认保留</button>
+       <button type="button" disabled={!!busyKey} onClick={()=>void moveSingle(matched,matched.folder||'')}>{t('sm.confirmKeep')}</button>
       </div>}
      </li>
     })}
    </ul>}
   </div>}
 
-  {error&&<div className="settings-alert is-error" role="alert"><AlertCircle size={15}/><span>{error}</span><button type="button" aria-label="关闭提示" onClick={()=>setError('')}><X size={13}/></button></div>}
-  {notice&&<div className="settings-alert is-success" role="status"><Check size={14}/><span>{notice}</span><button type="button" aria-label="关闭提示" onClick={()=>setNotice('')}><X size={13}/></button></div>}
+  {error&&<div className="settings-alert is-error" role="alert"><AlertCircle size={15}/><span>{error}</span><button type="button" aria-label={t('app.closeNotice')} onClick={()=>setError('')}><X size={13}/></button></div>}
+  {notice&&<div className="settings-alert is-success" role="status"><Check size={14}/><span>{notice}</span><button type="button" aria-label={t('app.closeNotice')} onClick={()=>setNotice('')}><X size={13}/></button></div>}
 
   <div className="sm-toolbar">
-   <div className="sm-segmented" role="group" aria-label="按类型筛选">
+   <div className="sm-segmented" role="group" aria-label={t('sm.filterTypeAria')}>
     {([
-     {id:'all',label:'全部',count:counts.total},
-     {id:'courseware',label:'课件',count:counts.courseware},
-     {id:'material',label:'资料',count:counts.material}
+     {id:'all',label:t('sm.filterAll'),count:counts.total},
+     {id:'courseware',label:t('sm.filterCourseware'),count:counts.courseware},
+     {id:'material',label:t('sm.filterMaterial'),count:counts.material}
     ] as {id:TypeFilter;label:string;count:number}[]).map(item=><button
      key={item.id}
      type="button"
@@ -650,24 +648,24 @@ export function SettingsMaterials({
 
    <label className="sm-search">
     <Search size={14}/>
-    <input type="search" aria-label="搜索资料或课件" placeholder="搜索文件名或分类…" value={query} onChange={event=>setQuery(event.target.value)}/>
-    {query&&<button type="button" aria-label="清空搜索" onClick={()=>setQuery('')}><X size={13}/></button>}
+    <input type="search" aria-label={t('sm.searchAria')} placeholder={t('sm.searchPlaceholder')} value={query} onChange={event=>setQuery(event.target.value)}/>
+    {query&&<button type="button" aria-label={t('app.clearSearch')} onClick={()=>setQuery('')}><X size={13}/></button>}
    </label>
 
-   <select className="sm-sort" aria-label="排序方式" value={sortBy} onChange={event=>setSortBy(event.target.value as SortMode)}>
-    <option value="name">按名称</option>
-    <option value="recent">按更新时间</option>
-    <option value="size">按文件大小</option>
+   <select className="sm-sort" aria-label={t('sm.sortAria')} value={sortBy} onChange={event=>setSortBy(event.target.value as SortMode)}>
+    <option value="name">{t('sm.sortName')}</option>
+    <option value="recent">{t('sm.sortRecent')}</option>
+    <option value="size">{t('sm.sortSize')}</option>
    </select>
   </div>
 
-  <div className="sm-folder-bar" aria-label="分类筛选与管理">
+  <div className="sm-folder-bar" aria-label={t('sm.folderBarAria')}>
    <div className="sm-folder-chips">
     <button type="button" className={'sm-chip'+(folderFilter==='__all__'?' is-active':'')} onClick={()=>{setFolderFilter('__all__');setRenamingFolder(null);setConfirmDeleteFolder(null)}}>
-     全部分类<small>{counts.total}</small>
+     {t('sm.allCategories')}<small>{counts.total}</small>
     </button>
     {counts.rootCount>0&&<button type="button" className={'sm-chip'+(folderFilter==='__root__'?' is-active':'')} onClick={()=>{setFolderFilter('__root__');setRenamingFolder(null);setConfirmDeleteFolder(null)}}>
-     未分类<small>{counts.rootCount}</small>
+     {t('folder.uncategorized')}<small>{counts.rootCount}</small>
     </button>}
     {existingFolders.map(path=><button
      key={path}
@@ -675,65 +673,65 @@ export function SettingsMaterials({
      className={'sm-chip'+(folderFilter===path?' is-active':'')}
      onClick={()=>{setFolderFilter(path);setRenamingFolder(null);setConfirmDeleteFolder(null)}}
     >
-     <Folder size={12}/><span>{folderLabel(path)}</span><small>{counts.byFolder.get(path)||0}</small>
+     <Folder size={12}/><span>{folderDisplayName(path)}</span><small>{counts.byFolder.get(path)||0}</small>
     </button>)}
     {creatingFolder?<form className="sm-inline-folder-form" onSubmit={event=>void createFolder(event)}>
-     <input ref={newFolderRef} aria-label="新分类名称" placeholder="新分类名" value={newFolderInput} maxLength={60} onChange={event=>setNewFolderInput(event.target.value)} onKeyDown={event=>stopEscape(event,()=>{setCreatingFolder(false);setNewFolderInput('')})}/>
-     <button type="submit" disabled={!newFolderInput.trim()||!!busyKey}>添加</button>
-     <button type="button" aria-label="取消新建分类" onClick={()=>{setCreatingFolder(false);setNewFolderInput('')}}><X size={12}/></button>
+     <input ref={newFolderRef} aria-label={t('sidebar.newCategoryName')} placeholder={t('sm.newCategoryPlaceholder')} value={newFolderInput} maxLength={60} onChange={event=>setNewFolderInput(event.target.value)} onKeyDown={event=>stopEscape(event,()=>{setCreatingFolder(false);setNewFolderInput('')})}/>
+     <button type="submit" disabled={!newFolderInput.trim()||!!busyKey}>{t('app.add')}</button>
+     <button type="button" aria-label={t('sm.cancelNewCategory')} onClick={()=>{setCreatingFolder(false);setNewFolderInput('')}}><X size={12}/></button>
     </form>:<button type="button" className="sm-chip sm-chip-add" disabled={!!busyKey} onClick={()=>{setCreatingFolder(true);setRenamingFolder(null);setConfirmDeleteFolder(null)}}>
-     <FolderPlus size={12}/>新建分类
+     <FolderPlus size={12}/>{t('sm.newCategory')}
     </button>}
    </div>
 
    {folderFilter!=='__all__'&&folderFilter!=='__root__'&&<div className="sm-folder-manage">
     {renamingFolder===folderFilter?<form className="sm-inline-folder-form" onSubmit={event=>void submitRenameFolder(event)}>
-     <input ref={renameFolderRef} aria-label="重命名分类" value={renameFolderInput} maxLength={60} onChange={event=>setRenameFolderInput(event.target.value)} onKeyDown={event=>stopEscape(event,()=>setRenamingFolder(null))}/>
-     <button type="submit" disabled={!renameFolderInput.trim()||!!busyKey}>保存</button>
-     <button type="button" onClick={()=>setRenamingFolder(null)}>取消</button>
+     <input ref={renameFolderRef} aria-label={t('sm.renameCategory')} value={renameFolderInput} maxLength={60} onChange={event=>setRenameFolderInput(event.target.value)} onKeyDown={event=>stopEscape(event,()=>setRenamingFolder(null))}/>
+     <button type="submit" disabled={!renameFolderInput.trim()||!!busyKey}>{t('app.save')}</button>
+     <button type="button" onClick={()=>setRenamingFolder(null)}>{t('app.cancel')}</button>
     </form>:confirmDeleteFolder===folderFilter?<div className="sm-inline-confirm">
-     <span>确认删除空分类？</span>
-     <button type="button" className="is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void deleteSelectedFolder(folderFilter)}>删除</button>
-     <button type="button" onClick={()=>setConfirmDeleteFolder(null)}>取消</button>
+     <span>{t('sm.confirmDeleteEmptyCategory')}</span>
+     <button type="button" className="is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void deleteSelectedFolder(folderFilter)}>{t('app.delete')}</button>
+     <button type="button" onClick={()=>setConfirmDeleteFolder(null)}>{t('app.cancel')}</button>
     </div>:<>
-     <button type="button" className="sm-folder-action" disabled={!!busyKey||courseLocked} title={courseLocked?'回复完成后可重命名分类':undefined} onClick={()=>{const leaf=folderFilter.split('/').pop()||folderFilter;setRenamingFolder(folderFilter);setRenameFolderInput(leaf);setConfirmDeleteFolder(null)}}>
-      <Pencil size={12}/>重命名分类
+     <button type="button" className="sm-folder-action" disabled={!!busyKey||courseLocked} title={courseLocked?t('sm.renameBusyTitle'):undefined} onClick={()=>{const leaf=folderFilter.split('/').pop()||folderFilter;setRenamingFolder(folderFilter);setRenameFolderInput(leaf);setConfirmDeleteFolder(null)}}>
+      <Pencil size={12}/>{t('sm.renameCategory')}
      </button>
      {!selectedFolderHasChildren&&<button type="button" className="sm-folder-action is-danger" disabled={!!busyKey||courseLocked} onClick={()=>{setConfirmDeleteFolder(folderFilter);setRenamingFolder(null)}}>
-      <Trash2 size={12}/>删除空分类
+      <Trash2 size={12}/>{t('sm.deleteEmptyCategory')}
      </button>}
     </>}
    </div>}
   </div>
 
-  {loading&&!sources.length?<div className="settings-state-loading" role="status"><span className="spinner"/>正在读取课程资料与课件…</div>:visibleSources.length===0?<div className="sm-empty">
+  {loading&&!sources.length?<div className="settings-state-loading" role="status"><span className="spinner"/>{t('sm.loadingMaterials')}</div>:visibleSources.length===0?<div className="sm-empty">
    <div className="sm-empty-icon">{typeFilter==='courseware'?<Presentation size={24}/>:<FileText size={24}/>}</div>
    {sources.length===0?<>
-    <h3>「{selectedCourse?.name||'当前课程'}」还没有上传文件</h3>
-    <p>可以拖入文件，或直接上传 PDF 课件、教材、作业与笔记。资料会自动分类整理。</p>
+    <h3>{t('sm.emptyCourseTitle',{course:selectedCourseLabel})}</h3>
+    <p>{t('sm.emptyCourseDesc')}</p>
     <div className="sm-empty-actions">
-     <button type="button" className="settings-btn-accent" disabled={uploading} onClick={()=>coursewareInput.current?.click()}><Presentation size={14}/>上传课件</button>
-     <button type="button" className="settings-btn-secondary" disabled={uploading} onClick={()=>materialInput.current?.click()}><Upload size={14}/>上传资料</button>
+     <button type="button" className="settings-btn-accent" disabled={uploading} onClick={()=>coursewareInput.current?.click()}><Presentation size={14}/>{t('sm.uploadCourseware')}</button>
+     <button type="button" className="settings-btn-secondary" disabled={uploading} onClick={()=>materialInput.current?.click()}><Upload size={14}/>{t('sm.uploadMaterials')}</button>
     </div>
    </>:<>
-    <h3>没有符合当前筛选的文件</h3>
-    <p>换一个关键词，或者切换分类与类型筛选。</p>
-    <button type="button" className="settings-btn-secondary" onClick={()=>{setTypeFilter('all');setFolderFilter('__all__');setQuery('')}}>清除全部筛选</button>
+    <h3>{t('sm.emptyFilterTitle')}</h3>
+    <p>{t('sm.emptyFilterDesc')}</p>
+    <button type="button" className="settings-btn-secondary" onClick={()=>{setTypeFilter('all');setFolderFilter('__all__');setQuery('')}}>{t('sm.clearAllFilters')}</button>
    </>}
   </div>:<div className="sm-list-wrap">
    <div className="sm-list-header">
     <label className="sm-checkbox-wrap">
      <input
       type="checkbox"
-      aria-label="全选当前列表"
+      aria-label={t('sm.selectAllAria')}
       checked={allVisibleSelected}
       ref={el=>{if(el)el.indeterminate=selectedVisibleCount>0&&!allVisibleSelected}}
       onChange={toggleSelectAll}
      />
-     <span>文件名 ({visibleSources.length})</span>
+     <span>{t('sm.colFileName',{count:visibleSources.length})}</span>
     </label>
-    <span className="sm-col-meta">大小与更新</span>
-    <span className="sm-col-actions">操作</span>
+    <span className="sm-col-meta">{t('sm.colMeta')}</span>
+    <span className="sm-col-actions">{t('sm.colActions')}</span>
    </div>
 
    <div className="sm-list" role="list">
@@ -747,12 +745,12 @@ export function SettingsMaterials({
      const isMoving=movingId===source.id
      const isConfirmingDelete=confirmDeleteId===source.id
      const downloadUrl=(source.url||`/api/courses/${encodeURIComponent(selectedCourseId)}/sources/${encodeURIComponent(source.id)}/file`)+'?download=1'
-     const dateLabel=formatShortDate(source.modifiedAt||source.uploadedAt)
+     const dateLabel=formatShortDate(source.modifiedAt||source.uploadedAt,locale)
 
      return <div key={source.id} role="listitem" className={'sm-row-wrap'+(checked?' is-selected':'')+(isMoving||isRenaming?' is-editing':'')}>
       <div className="sm-row">
        <label className="sm-row-check">
-        <input type="checkbox" aria-label={`选择《${source.name}》`} checked={checked} onChange={()=>toggleSelect(source.id)}/>
+        <input type="checkbox" aria-label={t('sm.selectItemAria',{name:source.name})} checked={checked} onChange={()=>toggleSelect(source.id)}/>
        </label>
 
        <span className={'sm-file-icon is-'+badge.kind} aria-hidden="true">{badge.icon}</span>
@@ -762,7 +760,7 @@ export function SettingsMaterials({
          <div className="sm-rename-input-group">
           <input
            ref={renameInputRef}
-           aria-label="新文件名"
+           aria-label={t('sm.newFileNameAria')}
            value={renameStem}
            maxLength={220}
            disabled={!!busyKey}
@@ -771,24 +769,24 @@ export function SettingsMaterials({
           />
           {renameExt&&<span className="sm-rename-ext">{renameExt}</span>}
          </div>
-         <button type="submit" className="settings-btn-primary-xs" disabled={!renameStem.trim()||!!busyKey}>保存</button>
-         <button type="button" className="settings-btn-ghost-xs" onClick={()=>setRenamingId(null)}>取消</button>
+         <button type="submit" className="settings-btn-primary-xs" disabled={!renameStem.trim()||!!busyKey}>{t('app.save')}</button>
+         <button type="button" className="settings-btn-ghost-xs" onClick={()=>setRenamingId(null)}>{t('app.cancel')}</button>
         </form>:<>
          <button
           type="button"
           className="sm-row-title"
-          title={`打开「${source.relativePath}」`}
+          title={t('sm.openPathTitle',{path:source.relativePath})}
           disabled={!!busyKey||(conversationBusy&&selectedCourseId!==activeCourseId)}
           onClick={()=>void onOpenSource?.(selectedCourseId,source.id)}
          >
           <span>{source.name}</span>
          </button>
          <div className="sm-row-tags">
-          <span className={'sm-tag '+(courseware?'is-courseware':'is-folder')}>{courseware?'课件':folderLabel(source.folder)}</span>
-          {courseware&&source.folder&&source.folder!=='课件'&&<span className="sm-tag is-subtle">{folderLabel(source.folder)}</span>}
-          {readingNow&&<span className="sm-tag is-reading">正在阅读</span>}
-          {pending&&<span className="sm-tag is-warn">待确认</span>}
-          {isSlides(source)&&<span className="sm-tag is-subtle">需转 PDF 阅读</span>}
+          <span className={'sm-tag '+(courseware?'is-courseware':'is-folder')}>{courseware?t('sm.tagCourseware'):folderDisplayName(source.folder)}</span>
+          {courseware&&source.folder&&source.folder!=='课件'&&<span className="sm-tag is-subtle">{folderDisplayName(source.folder)}</span>}
+          {readingNow&&<span className="sm-tag is-reading">{t('sm.tagReading')}</span>}
+          {pending&&<span className="sm-tag is-warn">{t('sm.tagPending')}</span>}
+          {isSlides(source)&&<span className="sm-tag is-subtle">{t('sidebar.convertSlidesHint')}</span>}
          </div>
         </>}
        </div>
@@ -800,22 +798,22 @@ export function SettingsMaterials({
 
        <div className="sm-row-actions">
         {isConfirmingDelete?<div className="sm-inline-confirm" onKeyDown={event=>stopEscape(event,()=>setConfirmDeleteId(null))}>
-         <button type="button" className="is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void deleteSingle(source)}>{busyKey==='delete:'+source.id?'删除中…':'确认删除'}</button>
-         <button type="button" onClick={()=>setConfirmDeleteId(null)}>取消</button>
+         <button type="button" className="is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void deleteSingle(source)}>{busyKey==='delete:'+source.id?t('app.deleting'):t('sm.confirmDelete')}</button>
+         <button type="button" onClick={()=>setConfirmDeleteId(null)}>{t('app.cancel')}</button>
         </div>:<>
-         {onOpenSource&&<button type="button" className="sm-icon-btn" title="在工作区打开" aria-label={`打开《${source.name}》`} disabled={!!busyKey||(conversationBusy&&selectedCourseId!==activeCourseId)} onClick={()=>void onOpenSource(selectedCourseId,source.id)}>
+         {onOpenSource&&<button type="button" className="sm-icon-btn" title={t('sm.openInWorkspace')} aria-label={t('sm.openItemAria',{name:source.name})} disabled={!!busyKey||(conversationBusy&&selectedCourseId!==activeCourseId)} onClick={()=>void onOpenSource(selectedCourseId,source.id)}>
           <ArrowUpRight size={14}/>
          </button>}
-         <button type="button" className={'sm-icon-btn'+(isMoving?' is-active':'')} title="移动分类 / 切换课件" aria-label={`移动《${source.name}》`} aria-expanded={isMoving} disabled={!!busyKey} onClick={()=>{setMovingId(isMoving?null:source.id);setMoveNewFolderOpen(false);setMoveNewFolderName('');setRenamingId(null);setConfirmDeleteId(null)}}>
+         <button type="button" className={'sm-icon-btn'+(isMoving?' is-active':'')} title={t('sm.moveTitle')} aria-label={t('sm.moveItemAria',{name:source.name})} aria-expanded={isMoving} disabled={!!busyKey} onClick={()=>{setMovingId(isMoving?null:source.id);setMoveNewFolderOpen(false);setMoveNewFolderName('');setRenamingId(null);setConfirmDeleteId(null)}}>
           <FolderInput size={14}/>
          </button>
-         <button type="button" className={'sm-icon-btn'+(isRenaming?' is-active':'')} title={courseLocked?'回复完成后可重命名':'重命名'} aria-label={`重命名《${source.name}》`} disabled={!!busyKey||courseLocked} onClick={()=>startRename(source)}>
+         <button type="button" className={'sm-icon-btn'+(isRenaming?' is-active':'')} title={courseLocked?t('sm.renameFileBusyTitle'):t('sm.renameTitle')} aria-label={t('sm.renameItemAria',{name:source.name})} disabled={!!busyKey||courseLocked} onClick={()=>startRename(source)}>
           <Pencil size={14}/>
          </button>
-         <a className="sm-icon-btn" href={downloadUrl} download={source.name} title="下载原件" aria-label={`下载《${source.name}》`}>
+         <a className="sm-icon-btn" href={downloadUrl} download={source.name} title={t('sm.downloadOriginal')} aria-label={t('sm.downloadItemAria',{name:source.name})}>
           <Download size={14}/>
          </a>
-         <button type="button" className="sm-icon-btn is-danger" title={courseLocked?'回复完成后可删除':'删除文件'} aria-label={`删除《${source.name}》`} disabled={!!busyKey||courseLocked} onClick={()=>{setConfirmDeleteId(source.id);setMovingId(null);setRenamingId(null)}}>
+         <button type="button" className="sm-icon-btn is-danger" title={courseLocked?t('sm.deleteFileBusyTitle'):t('sm.deleteFile')} aria-label={t('sm.deleteItemAria',{name:source.name})} disabled={!!busyKey||courseLocked} onClick={()=>{setConfirmDeleteId(source.id);setMovingId(null);setRenamingId(null)}}>
           <Trash2 size={14}/>
          </button>
         </>}
@@ -825,25 +823,25 @@ export function SettingsMaterials({
       {isMoving&&<div className="sm-move-drawer" onKeyDown={event=>stopEscape(event,()=>setMovingId(null))}>
        <div className="sm-move-row">
         <label className="sm-move-select-wrap">
-         <span>移动到分类</span>
-         <select aria-label={`选择《${source.name}》的新分类`} value={source.folder||''} disabled={!!busyKey} onChange={event=>void moveSingle(source,event.target.value)}>
-          {moveTargetOptions.map(path=><option key={path} value={path}>{folderLabel(path)}</option>)}
+         <span>{t('sm.moveToCategory')}</span>
+         <select aria-label={t('sm.chooseNewCategoryAria',{name:source.name})} value={source.folder||''} disabled={!!busyKey} onChange={event=>void moveSingle(source,event.target.value)}>
+          {moveTargetOptions.map(path=><option key={path} value={path}>{folderDisplayName(path)}</option>)}
          </select>
         </label>
         {isPdf(source)&&!courseware&&<button type="button" className="settings-btn-accent-xs" disabled={!!busyKey} onClick={()=>void moveSingle(source,'课件',true)}>
-         <Presentation size={12}/>转为课件
+         <Presentation size={12}/>{t('sm.promoteCourseware')}
         </button>}
         {courseware&&<button type="button" className="settings-btn-secondary-xs" disabled={!!busyKey} onClick={()=>void moveSingle(source,'教材')}>
-         移至资料（教材）
+         {t('sm.demoteMaterial')}
         </button>}
         <button type="button" className="settings-btn-ghost-xs" disabled={!!busyKey} onClick={()=>setMoveNewFolderOpen(v=>!v)}>
-         <Plus size={12}/>新建分类
+         <Plus size={12}/>{t('sm.newCategory')}
         </button>
-        <button type="button" className="sm-icon-btn" aria-label="收起移动栏" onClick={()=>setMovingId(null)}><X size={13}/></button>
+        <button type="button" className="sm-icon-btn" aria-label={t('sm.closeMoveDrawer')} onClick={()=>setMovingId(null)}><X size={13}/></button>
        </div>
        {moveNewFolderOpen&&<form className="sm-move-new-form" onSubmit={event=>void createFolderAndMove(event,source)}>
-        <input autoFocus aria-label="新分类名称" placeholder="输入新分类名称…" value={moveNewFolderName} maxLength={60} disabled={!!busyKey} onChange={event=>setMoveNewFolderName(event.target.value)}/>
-        <button type="submit" className="settings-btn-primary-xs" disabled={!moveNewFolderName.trim()||!!busyKey}>新建并移入</button>
+        <input autoFocus aria-label={t('sidebar.newCategoryName')} placeholder={t('sm.newCategoryInputPlaceholder')} value={moveNewFolderName} maxLength={60} disabled={!!busyKey} onChange={event=>setMoveNewFolderName(event.target.value)}/>
+        <button type="submit" className="settings-btn-primary-xs" disabled={!moveNewFolderName.trim()||!!busyKey}>{t('sm.createAndMove')}</button>
        </form>}
       </div>}
      </div>
@@ -851,27 +849,27 @@ export function SettingsMaterials({
    </div>
   </div>}
 
-  {selectedIds.size>0&&<div className="sm-batch-bar" role="region" aria-label="批量操作">
-   <span className="sm-batch-count">已选 <strong>{selectedIds.size}</strong> 份</span>
+  {selectedIds.size>0&&<div className="sm-batch-bar" role="region" aria-label={t('sm.batchAria')}>
+   <span className="sm-batch-count"><strong>{t('sm.batchSelected',{count:selectedIds.size})}</strong></span>
    <div className="sm-batch-controls">
     {confirmBatchDelete?<>
-     <span className="sm-batch-warn">删除后不可恢复</span>
-     <button type="button" className="sm-batch-btn is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void batchDelete()}>{busyKey==='batch-delete'?'删除中…':`确认删除 ${selectedIds.size} 份`}</button>
-     <button type="button" className="sm-batch-btn" onClick={()=>setConfirmBatchDelete(false)}>取消</button>
+     <span className="sm-batch-warn">{t('sm.batchDeleteWarn')}</span>
+     <button type="button" className="sm-batch-btn is-danger" disabled={!!busyKey||courseLocked} onClick={()=>void batchDelete()}>{busyKey==='batch-delete'?t('app.deleting'):t('sm.batchConfirmDelete',{count:selectedIds.size})}</button>
+     <button type="button" className="sm-batch-btn" onClick={()=>setConfirmBatchDelete(false)}>{t('app.cancel')}</button>
     </>:<>
      <div className="sm-batch-move">
-      <select aria-label="批量移动目标分类" value={batchMoveFolder} disabled={!!busyKey} onChange={event=>setBatchMoveFolder(event.target.value)}>
-       {moveTargetOptions.map(path=><option key={path} value={path}>{folderLabel(path)}</option>)}
+      <select aria-label={t('sm.batchMoveAria')} value={batchMoveFolder} disabled={!!busyKey} onChange={event=>setBatchMoveFolder(event.target.value)}>
+       {moveTargetOptions.map(path=><option key={path} value={path}>{folderDisplayName(path)}</option>)}
       </select>
-      <button type="button" className="sm-batch-btn" disabled={!!busyKey} onClick={()=>void batchMove(batchMoveFolder)}>移动</button>
+      <button type="button" className="sm-batch-btn" disabled={!!busyKey} onClick={()=>void batchMove(batchMoveFolder)}>{t('sm.batchMoveBtn')}</button>
      </div>
      {canPromoteSelectedToCourseware&&<button type="button" className="sm-batch-btn is-accent" disabled={!!busyKey} onClick={()=>void batchMove('课件',true)}>
-      <Presentation size={13}/>设为课件
+      <Presentation size={13}/>{t('sm.batchSetCourseware')}
      </button>}
-     <button type="button" className="sm-batch-btn is-danger-soft" disabled={!!busyKey||courseLocked} title={courseLocked?'回复完成后可删除':undefined} onClick={()=>setConfirmBatchDelete(true)}>
-      <Trash2 size={13}/>删除
+     <button type="button" className="sm-batch-btn is-danger-soft" disabled={!!busyKey||courseLocked} title={courseLocked?t('sm.deleteFileBusyTitle'):undefined} onClick={()=>setConfirmBatchDelete(true)}>
+      <Trash2 size={13}/>{t('app.delete')}
      </button>
-     <button type="button" className="sm-batch-close" aria-label="取消选择" onClick={()=>setSelectedIds(new Set())}><X size={14}/></button>
+     <button type="button" className="sm-batch-close" aria-label={t('sm.clearSelection')} onClick={()=>setSelectedIds(new Set())}><X size={14}/></button>
     </>}
    </div>
   </div>}

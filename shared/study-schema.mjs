@@ -1,4 +1,28 @@
 export const QUESTION_TYPES = ['true_false', 'choice', 'fill_blank', 'short_answer', 'flashcard'];
+export const MAX_CATEGORY_LABEL_LENGTH = 120;
+
+export function normalizeCategoryText(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new TypeError('分类名称必须是字符串。');
+  const cleaned = value.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned.length > MAX_CATEGORY_LABEL_LENGTH) {
+    throw new TypeError(`分类名称不能超过 ${MAX_CATEGORY_LABEL_LENGTH} 个字符。`);
+  }
+  return cleaned;
+}
+
+export function checkedCategory({ unit = '', knowledgePoint = '' } = {}, { requireAny = false } = {}) {
+  const normalizedUnit = normalizeCategoryText(unit);
+  const normalizedKnowledgePoint = normalizeCategoryText(knowledgePoint);
+  if (requireAny && !normalizedUnit && !normalizedKnowledgePoint) {
+    throw new TypeError('请至少填写单元或知识点名称。');
+  }
+  return { unit: normalizedUnit, knowledgePoint: normalizedKnowledgePoint };
+}
+
+export function categoryKey(unit = '', knowledgePoint = '') {
+  return `${String(unit || '').trim()}\0${String(knowledgePoint || '').trim()}`;
+}
 
 export function validateStudySpec(spec) {
   if (!spec || typeof spec !== 'object' || !Array.isArray(spec.items) || !spec.items.length || spec.items.length > 100) throw new Error('学习内容必须包含 1–100 个题目。');

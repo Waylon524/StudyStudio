@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { validateStudySpec, gradeAnswer } from '../shared/study-schema.mjs';
+import { validateStudySpec, gradeAnswer, checkedCategory, categoryKey, normalizeCategoryText } from '../shared/study-schema.mjs';
 import { validateCanvasSpec } from '../shared/canvas-schema.mjs';
 import { pdfInfo } from './pdf-reader.mjs';
 import {validateCoursewareUpload} from './upload-policy.mjs';
@@ -16,7 +16,9 @@ const exec = promisify(execFile);
 const extractor = fileURLToPath(new URL('./file-extract.py', import.meta.url));
 const now = () => new Date().toISOString();
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
-const blank = () => ({version:1, courseId:null, sets:[], items:[], attempts:[], attachments:[], turns:[], readingPositions:{}, canvases:[]});
+const blank = () => ({version:1, courseId:null, sets:[], items:[], attempts:[], attachments:[], turns:[], readingPositions:{}, canvases:[], practiceCategories:[], deletedQuestionIds:[]});
+const PRACTICE_META_KEYS = new Set(['unit', 'knowledgePoint', 'organizedBy', 'organizedAt', 'editedAt', 'createdAt']);
+const stripPracticeMeta = item => Object.fromEntries(Object.entries(item).filter(([key]) => !PRACTICE_META_KEYS.has(key)));
 const memoryStart='<!-- STUDY-STUDIO MEMORY START -->', memoryEnd='<!-- STUDY-STUDIO MEMORY END -->';
 const internalFiles=new Set(['AGENTS.md','学习进度.md','课程重要信息.md']);
 const internalFilesLower=new Set([...internalFiles].map(name=>name.toLowerCase()));
@@ -122,9 +124,284 @@ export class LearningStore {
     return this._mutate(course,s => {
       const setId = digest([course.id,threadId,itemId,spec.id || 'set']);
       const incoming = spec.items.map((q,i) => ({...q,id:digest([course.id,threadId,itemId,spec.id || 'set',q.id ?? String(i+1)]),sourceId:q.id ?? String(i+1),setId,threadId,itemId}));
+      const specHash = digest(incoming);
       const old = s.sets.find(x => x.id === setId);
-      if (old) { const existing = s.items.filter(x=>x.setId===setId); if (JSON.stringify(existing) !== JSON.stringify(incoming)) throw Error('已有题组内容发生变化，请使用新的消息 ID。'); return {set:old,items:existing.map(i=>decorated(s,i))}; }
-      const set = {id:setId,threadId,itemId,title:spec.title || '',createdAt:now()}; s.sets.push(set); s.items.push(...incoming); return {set,items:incoming.map(i=>decorated(s,i))};
+      if (old) {
+        const existing = s.items.filter(x=>x.setId===setId);
+        if (old.specHash) {
+          if (old.specHash !== specHash) throw Error('已有题组内容发生变化，请使用新的消息 ID。');
+        } else {
+          const deleted = new Set(s.deletedQuestionIds || []);
+          const survivingIncoming = incoming.filter(item => !deleted.has(item.id));
+          const anyEdited = existing.some(item => Boolean(item.editedAt));
+          if (!anyEdited && JSON.stringify(existing.map(stripPracticeMeta)) !== JSON.stringify(survivingIncoming)) {
+            throw Error('已有题组内容发生变化，请使用新的消息 ID。');
+          }
+          old.specHash = specHash;
+        }
+        return {set:old,items:existing.map(i=>decorated(s,i))};
+      }
+      const set = {id:setId,threadId,itemId,title:spec.title || '',specHash,createdAt:now()}; s.sets.push(set); s.items.push(...incoming); return {set,items:incoming.map(i=>decorated(s,i))};
+    });
+  }
+  _collectPracticeCategories(state) {
+    const map = new Map();
+    const add = (unit, knowledgePoint) => {
+      const u = typeof unit === 'string' ? unit.trim() : '';
+      const kp = typeof knowledgePoint === 'string' ? knowledgePoint.trim() : '';
+      if (!u && !kp) return;
+      const key = categoryKey(u, kp);
+      if (!map.has(key)) map.set(key, { unit: u, knowledgePoint: kp });
+    };
+    for (const entry of state.practiceCategories || []) add(entry?.unit, entry?.knowledgePoint);
+    for (const item of state.items || []) add(item?.unit, item?.knowledgePoint);
+    const collator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
+    return [...map.values()].sort((a, b) => collator.compare(a.unit, b.unit) || collator.compare(a.knowledgePoint, b.knowledgePoint));
+  }
+  _ensureCategoryEntry(state, { unit, knowledgePoint }) {
+    if (!unit && !knowledgePoint) return;
+    state.practiceCategories ||= [];
+    const key = categoryKey(unit, knowledgePoint);
+    if (!state.practiceCategories.some(entry => categoryKey(entry?.unit, entry?.knowledgePoint) === key)) {
+      state.practiceCategories.push({ unit, knowledgePoint, createdAt: now() });
+    }
+  }
+  async createPracticeCategory(course, input) {
+    const category = checkedCategory(input, { requireAny: true });
+    return this._mutate(course, s => {
+      this._ensureCategoryEntry(s, category);
+      return { category, categories: this._collectPracticeCategories(s) };
+    });
+  }
+  async renamePracticeCategory(course, { oldUnit = '', oldKnowledgePoint, unit = '', knowledgePoint = '' } = {}) {
+    const fromUnit = normalizeCategoryText(oldUnit);
+    const unitOnly = oldKnowledgePoint === undefined;
+    const fromKp = unitOnly ? '' : normalizeCategoryText(oldKnowledgePoint);
+    if (!fromUnit && !fromKp) throw Object.assign(Error('未指定要修改的原分类。'), { status: 400 });
+    const nextUnit = normalizeCategoryText(unit);
+    const nextKp = unitOnly ? '' : normalizeCategoryText(knowledgePoint);
+    if (unitOnly && !nextUnit) throw Object.assign(Error('新单元名称不能为空。'), { status: 400 });
+    if (!unitOnly && !nextUnit && !nextKp) throw Object.assign(Error('请至少填写单元或知识点名称。'), { status: 400 });
+    return this._mutate(course, s => {
+      s.practiceCategories ||= [];
+      let updatedQuestions = 0;
+      const ts = now();
+      if (unitOnly) {
+        for (const item of s.items) {
+          if ((item.unit || '').trim() === fromUnit) {
+            item.unit = nextUnit;
+            item.organizedBy = 'user';
+            item.organizedAt = ts;
+            updatedQuestions++;
+          }
+        }
+        const dedup = new Map();
+        for (const entry of s.practiceCategories) {
+          const u = (entry?.unit || '').trim() === fromUnit ? nextUnit : (entry?.unit || '').trim();
+          const kp = (entry?.knowledgePoint || '').trim();
+          if (!u && !kp) continue;
+          const key = categoryKey(u, kp);
+          if (!dedup.has(key)) dedup.set(key, { unit: u, knowledgePoint: kp, createdAt: entry?.createdAt || ts });
+        }
+        s.practiceCategories = [...dedup.values()];
+      } else {
+        const oldKey = categoryKey(fromUnit, fromKp);
+        for (const item of s.items) {
+          if (categoryKey(item.unit, item.knowledgePoint) === oldKey) {
+            item.unit = nextUnit;
+            item.knowledgePoint = nextKp;
+            item.organizedBy = 'user';
+            item.organizedAt = ts;
+            updatedQuestions++;
+          }
+        }
+        const dedup = new Map();
+        for (const entry of s.practiceCategories) {
+          const isTarget = categoryKey(entry?.unit, entry?.knowledgePoint) === oldKey;
+          const u = isTarget ? nextUnit : (entry?.unit || '').trim();
+          const kp = isTarget ? nextKp : (entry?.knowledgePoint || '').trim();
+          if (!u && !kp) continue;
+          const key = categoryKey(u, kp);
+          if (!dedup.has(key)) dedup.set(key, { unit: u, knowledgePoint: kp, createdAt: entry?.createdAt || ts });
+        }
+        const nextKey = categoryKey(nextUnit, nextKp);
+        if (!dedup.has(nextKey)) dedup.set(nextKey, { unit: nextUnit, knowledgePoint: nextKp, createdAt: ts });
+        s.practiceCategories = [...dedup.values()];
+      }
+      return { updatedQuestions, categories: this._collectPracticeCategories(s) };
+    });
+  }
+  async deletePracticeCategory(course, { unit = '', knowledgePoint } = {}) {
+    const targetUnit = normalizeCategoryText(unit);
+    const unitOnly = knowledgePoint === undefined;
+    const targetKp = unitOnly ? '' : normalizeCategoryText(knowledgePoint);
+    if (!targetUnit && !targetKp) throw Object.assign(Error('未指定要删除的分类。'), { status: 400 });
+    return this._mutate(course, s => {
+      let clearedQuestions = 0;
+      const matches = (u, kp) => unitOnly ? (u || '').trim() === targetUnit : categoryKey(u, kp) === categoryKey(targetUnit, targetKp);
+      for (const item of s.items) {
+        if (matches(item.unit, item.knowledgePoint)) {
+          delete item.unit;
+          delete item.knowledgePoint;
+          delete item.organizedBy;
+          delete item.organizedAt;
+          clearedQuestions++;
+        }
+      }
+      s.practiceCategories = (s.practiceCategories || []).filter(entry => !matches(entry?.unit, entry?.knowledgePoint));
+      return { deleted: true, clearedQuestions, categories: this._collectPracticeCategories(s) };
+    });
+  }
+  async categorizeQuestions(course, { questionIds, unit = '', knowledgePoint = '', organizedBy = 'user' } = {}) {
+    if (!Array.isArray(questionIds) || !questionIds.length || questionIds.length > 200 || questionIds.some(id => typeof id !== 'string' || !id) || new Set(questionIds).size !== questionIds.length) {
+      throw Object.assign(Error('请选择要分类的题目。'), { status: 400 });
+    }
+    const category = checkedCategory({ unit, knowledgePoint }, { requireAny: false });
+    const idSet = new Set(questionIds);
+    return this._mutate(course, s => {
+      const ts = now();
+      let updatedCount = 0;
+      for (const item of s.items) {
+        if (!idSet.has(item.id)) continue;
+        if (category.unit || category.knowledgePoint) {
+          item.unit = category.unit;
+          item.knowledgePoint = category.knowledgePoint;
+          item.organizedBy = organizedBy === 'ai' ? 'ai' : 'user';
+          item.organizedAt = ts;
+        } else {
+          delete item.unit;
+          delete item.knowledgePoint;
+          delete item.organizedBy;
+          delete item.organizedAt;
+        }
+        updatedCount++;
+      }
+      if (!updatedCount) throw Object.assign(Error('未找到指定的题目。'), { status: 404 });
+      if (category.unit || category.knowledgePoint) this._ensureCategoryEntry(s, category);
+      return { updatedCount, categories: this._collectPracticeCategories(s), items: s.items.filter(item => idSet.has(item.id)).map(item => decorated(s, item)) };
+    });
+  }
+  async applyPracticeOrganization(course, assignments) {
+    if (!Array.isArray(assignments)) throw Object.assign(Error('整理结果无效。'), { status: 400 });
+    const byId = new Map();
+    for (const entry of assignments) {
+      if (!entry || typeof entry.questionId !== 'string' || !entry.questionId) continue;
+      const category = checkedCategory({ unit: entry.unit, knowledgePoint: entry.knowledgePoint }, { requireAny: false });
+      if (!category.unit && !category.knowledgePoint) continue;
+      byId.set(entry.questionId, category);
+    }
+    return this._mutate(course, s => {
+      const ts = now();
+      let organizedCount = 0;
+      for (const item of s.items) {
+        const assigned = byId.get(item.id);
+        if (!assigned) continue;
+        item.unit = assigned.unit;
+        item.knowledgePoint = assigned.knowledgePoint;
+        item.organizedBy = 'ai';
+        item.organizedAt = ts;
+        this._ensureCategoryEntry(s, assigned);
+        organizedCount++;
+      }
+      return { organizedCount, totalCount: s.items.length, categories: this._collectPracticeCategories(s), items: s.items.map(item => decorated(s, item)) };
+    });
+  }
+  async updateQuestion(course, patch = {}) {
+    if (!patch || typeof patch !== 'object' || typeof patch.questionId !== 'string' || !patch.questionId) {
+      throw Object.assign(Error('题目 ID 无效。'), { status: 400 });
+    }
+    return this._mutate(course, s => {
+      const index = s.items.findIndex(item => item.id === patch.questionId);
+      if (index < 0) throw Object.assign(Error('未找到指定题目。'), { status: 404 });
+      const current = s.items[index];
+      const next = { ...current };
+      let contentChanged = false;
+      if (patch.prompt !== undefined) {
+        if (typeof patch.prompt !== 'string' || !patch.prompt.trim() || patch.prompt.length > 5000) throw Object.assign(Error('题干无效。'), { status: 400 });
+        if (patch.prompt.trim() !== current.prompt) contentChanged = true;
+        next.prompt = patch.prompt.trim();
+      }
+      if (patch.explanation !== undefined) {
+        if (patch.explanation !== null && (typeof patch.explanation !== 'string' || patch.explanation.length > 10000)) throw Object.assign(Error('解析内容无效。'), { status: 400 });
+        const cleaned = typeof patch.explanation === 'string' ? patch.explanation.trim() : '';
+        if (cleaned) next.explanation = cleaned; else delete next.explanation;
+        contentChanged = true;
+      }
+      if (patch.rubric !== undefined) {
+        if (patch.rubric !== null && (typeof patch.rubric !== 'string' || patch.rubric.length > 5000)) throw Object.assign(Error('评分标准无效。'), { status: 400 });
+        const cleaned = typeof patch.rubric === 'string' ? patch.rubric.trim() : '';
+        if (cleaned) next.rubric = cleaned; else delete next.rubric;
+        contentChanged = true;
+      }
+      if (patch.multiple !== undefined && current.type === 'choice') {
+        if (typeof patch.multiple !== 'boolean') throw Object.assign(Error('多选标识无效。'), { status: 400 });
+        next.multiple = patch.multiple;
+        contentChanged = true;
+      }
+      if (patch.options !== undefined && current.type === 'choice') {
+        next.options = patch.options;
+        contentChanged = true;
+      }
+      if (patch.answer !== undefined) {
+        next.answer = patch.answer;
+        contentChanged = true;
+      }
+      if (patch.acceptedAnswers !== undefined && current.type === 'fill_blank') {
+        if (!Array.isArray(patch.acceptedAnswers) || patch.acceptedAnswers.some(a => typeof a !== 'string')) throw Object.assign(Error('备选答案无效。'), { status: 400 });
+        const cleaned = patch.acceptedAnswers.map(a => a.trim()).filter(Boolean);
+        if (cleaned.length) next.acceptedAnswers = cleaned; else delete next.acceptedAnswers;
+        contentChanged = true;
+      }
+      if (patch.unit !== undefined || patch.knowledgePoint !== undefined) {
+        const category = checkedCategory({
+          unit: patch.unit !== undefined ? patch.unit : (current.unit || ''),
+          knowledgePoint: patch.knowledgePoint !== undefined ? patch.knowledgePoint : (current.knowledgePoint || ''),
+        }, { requireAny: false });
+        if (category.unit || category.knowledgePoint) {
+          next.unit = category.unit;
+          next.knowledgePoint = category.knowledgePoint;
+          next.organizedBy = 'user';
+          next.organizedAt = now();
+          this._ensureCategoryEntry(s, category);
+        } else {
+          delete next.unit;
+          delete next.knowledgePoint;
+          delete next.organizedBy;
+          delete next.organizedAt;
+        }
+      }
+      const specCandidate = stripPracticeMeta(next);
+      try {
+        validateStudySpec({ items: [specCandidate] });
+      } catch (error) {
+        throw Object.assign(Error(error.message || '题目内容无效。'), { status: 400 });
+      }
+      if (contentChanged) next.editedAt = now();
+      s.items[index] = next;
+      return { item: decorated(s, next), categories: this._collectPracticeCategories(s) };
+    });
+  }
+  async deleteQuestions(course, questionIds) {
+    if (!Array.isArray(questionIds) || !questionIds.length || questionIds.length > 200 || questionIds.some(id => typeof id !== 'string' || !id) || new Set(questionIds).size !== questionIds.length) {
+      throw Object.assign(Error('请选择要删除的题目。'), { status: 400 });
+    }
+    const idSet = new Set(questionIds);
+    return this._mutate(course, async s => {
+      const removed = s.items.filter(item => idSet.has(item.id));
+      if (!removed.length) throw Object.assign(Error('未找到要删除的题目。'), { status: 404 });
+      const removedIds = new Set(removed.map(item => item.id));
+      s.items = s.items.filter(item => !removedIds.has(item.id));
+      s.attempts = s.attempts.filter(attempt => !removedIds.has(attempt.questionId));
+      s.turns = s.turns.filter(turn => !(turn.kind === 'reveal' && removedIds.has(turn.questionId)));
+      s.deletedQuestionIds = [...new Set([...(s.deletedQuestionIds || []), ...removedIds])];
+      const keepImages = [];
+      for (const image of s.answerImages || []) {
+        if (!removedIds.has(image.questionId)) { keepImages.push(image); continue; }
+        const files = this._answerImagePaths(image);
+        for (const relative of Object.values(files)) await fs.rm(await this.safePath(course, relative), { force: true });
+      }
+      s.answerImages = keepImages;
+      return { deletedIds: [...removedIds], categories: this._collectPracticeCategories(s) };
     });
   }
   _answerImagePaths(image) {
@@ -235,7 +512,7 @@ export class LearningStore {
     const workspacePath=this.coursePath(course);
     let files;
     if(readonly){
-      try{const st=await fs.lstat(workspacePath);if(st.isSymbolicLink()||!st.isDirectory())return {coursewareCount:0,materialCount:0,fileCount:0,totalBytes:0,workspacePath};}catch(e){if(e.code==='ENOENT')return {coursewareCount:0,materialCount:0,fileCount:0,totalBytes:0,workspacePath};throw e;}
+      try{const st=await fs.lstat(workspacePath);if(st.isSymbolicLink()||!st.isDirectory())return {coursewareCount:0,materialCount:0,fileCount:0,questionCount:0,totalBytes:0,workspacePath};}catch(e){if(e.code==='ENOENT')return {coursewareCount:0,materialCount:0,fileCount:0,questionCount:0,totalBytes:0,workspacePath};throw e;}
       files=[];
       const walk=async(relative,depth)=>{
         const dir=await this.safePath(course,relative);
@@ -259,7 +536,12 @@ export class LearningStore {
       if(inCourseware&&ext==='.pdf')coursewareCount++;else materialCount++;
       totalBytes+=file.size||0;
     }
-    return {coursewareCount,materialCount,fileCount:coursewareCount+materialCount,totalBytes,workspacePath};
+    let questionCount=0;
+    try{
+      const stateHandle=await fs.open(await this.safePath(course,'.study-studio/state.json'),constants.O_RDONLY|constants.O_NOFOLLOW);
+      try{const parsed=JSON.parse(await stateHandle.readFile('utf8'));if(Array.isArray(parsed?.items))questionCount=parsed.items.length;}finally{await stateHandle.close();}
+    }catch{}
+    return {coursewareCount,materialCount,fileCount:coursewareCount+materialCount,questionCount,totalBytes,workspacePath};
   }
   async listFiles(course) { return (await this.scanWorkspace(course)).files; }
   _validateFolderPath(folder) {
@@ -617,7 +899,7 @@ export class LearningStore {
   async recordTurn(course,{threadId,text}) { if(typeof threadId!=='string'||!threadId||typeof text!=='string'||!text.trim()||text.length>4000) throw Error('学习记录无效。'); return this._mutate(course,async s=>{ const entry={id:randomUUID(),threadId,text,createdAt:now(),kind:'learning_event'}; s.turns.push(entry); await this._append(course,'学习进度.md',`\n- ${entry.createdAt}：${text}\n`); return entry; }); }
   async learning(course) {
     const state=await this._load(course),[progress,importantInfo]=await Promise.all([this._nativeText(course,'学习进度.md'),this._nativeText(course,'课程重要信息.md')]);
-    return {items:state.items.map(item=>decorated(state,item)),attempts:state.attempts,canvases:state.canvases||[],progress:progress.text,importantInfo:importantInfo.text,workspacePath:this.coursePath(course)};
+    return {items:state.items.map(item=>decorated(state,item)),attempts:state.attempts,canvases:state.canvases||[],categories:this._collectPracticeCategories(state),progress:progress.text,importantInfo:importantInfo.text,workspacePath:this.coursePath(course)};
   }
   async contextSnapshot(course) {
     // A chat sent immediately after submission must not snapshot a queued write.

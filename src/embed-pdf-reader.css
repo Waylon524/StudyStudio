@@ -22,4 +22,38 @@
 .embed-pdf-reader-export-spinner{animation:embed-pdf-export-spin .8s linear infinite}
 @keyframes embed-pdf-export-spin{to{transform:rotate(360deg)}}
 @container(max-width:550px){.embed-pdf-reader-ask{width:30px;height:32px;padding:0;border:0;background:transparent}.embed-pdf-reader-ask>span{display:none}.embed-pdf-reader-header{gap:2px;padding-inline:7px}.embed-pdf-reader-pages .embed-pdf-reader-icon{width:25px}.embed-pdf-reader-page-count{font-size:11px}.embed-pdf-reader-pages input{font-size:12px}}
-@media(prefers-reduced-motion:reduce){.embed-pdf-reader-export-spinner{animation:none}}
+.embed-pdf-reader-icon.is-active{background:#fdf3ee;color:#c8795c}
+.embed-pdf-fallback-outline{width:230px;flex-shrink:0;border-right:1px solid #e7e5e2;background:#faf9f6;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.embed-pdf-fallback-outline-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid #eeebe4;font-size:12px;font-weight:600;color:#3f3c37}
+.embed-pdf-fallback-outline-head button{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:#7c766d;cursor:pointer}
+.embed-pdf-fallback-outline-head button:hover{background:#eeece6;color:#262420}
+.embed-pdf-fallback-outline-list{flex:1;overflow:auto;padding:8px 6px}
+.embed-pdf-fallback-outline-list ul{list-style:none;margin:0;padding:0}
+.embed-pdf-fallback-outline-list ul.is-nested{padding-left:12px;border-left:1px solid #e8e4dc;margin-left:8px}
+.embed-pdf-fallback-outline-list button{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;border:0;border-radius:6px;background:transparent;padding:5px 8px;text-align:left;font-size:12px;color:#3f3c37;cursor:pointer}
+.embed-pdf-fallback-outline-list button:hover{background:#efede7;color:#262420}
+.embed-pdf-fallback-outline-list button>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.embed-pdf-fallback-outline-list button>small{font-size:10.5px;color:#9a948a;font-variant-numeric:tabular-nums;flex-shrink:0}
+.embed-pdf-fallback-outline-bar{padding:8px;border-bottom:1px solid #eeebe4;background:#faf9f6}
+.embed-pdf-outline-actions{display:flex;flex-direction:column;gap:6px;width:100%;min-width:0}
+.embed-pdf-outline-regenerate-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;width:100%;height:30px;padding:0 10px;border:1px solid #ded9d1;border-radius:7px;background:#faf8f4;color:#4a433b;font:inherit;font-size:12px;font-weight:500;white-space:nowrap;cursor:pointer;transition:background .12s ease,border-color .12s ease,color .12s ease}
+.embed-pdf-outline-regenerate-btn:hover:not(:disabled){background:#f2ece4;border-color:#d2c8bc;color:#282420}
+.embed-pdf-outline-regenerate-btn:disabled{opacity:.72;cursor:default}
+.embed-pdf-outline-regenerate-btn:focus-visible{outline:2px solid #a86d53;outline-offset:1px}
+.embed-pdf-outline-error{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;padding:6px 8px;border:1px solid #ecd5cc;border-radius:6px;background:#fff7f4;color:#9a4f3b;font-size:11.5px;line-height:1.4}
+.embed-pdf-outline-error>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.embed-pdf-outline-error>button{display:grid;place-items:center;flex:none;width:18px;height:18px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}
+.embed-pdf-outline-error>button:hover{background:#f7e5de}
+.pdf-outline-confirm-backdrop{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:16px;background:rgba(28,25,22,.34);backdrop-filter:blur(2px)}
+.pdf-outline-confirm-dialog{width:min(380px,100%);padding:18px 20px;border:1px solid #e4e0d8;border-radius:12px;background:#fff;box-shadow:0 16px 40px rgba(28,24,18,.18);color:#282725}
+.pdf-outline-confirm-dialog h2{margin:0 0 8px;font-size:15px;font-weight:600;color:#24221f}
+.pdf-outline-confirm-dialog p{margin:0;font-size:13px;line-height:1.6;color:#625c54}
+.pdf-outline-confirm-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px}
+.pdf-outline-confirm-cancel,.pdf-outline-confirm-primary{height:32px;padding:0 13px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer}
+.pdf-outline-confirm-cancel{border:1px solid #dedad3;background:#fff;color:#544f48}
+.pdf-outline-confirm-cancel:hover{background:#f5f3ef;color:#282725}
+.pdf-outline-confirm-primary{border:1px solid #c8795c;background:#c8795c;color:#fff}
+.pdf-outline-confirm-primary:hover:not(:disabled){background:#b6684c;border-color:#b6684c}
+.pdf-outline-confirm-primary:disabled{opacity:.6;cursor:default}
+.pdf-outline-confirm-cancel:focus-visible,.pdf-outline-confirm-primary:focus-visible{outline:2px solid #a86d53;outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.embed-pdf-reader-export-spinner{animation:none}.embed-pdf-outline-regenerate-btn{transition:none}}

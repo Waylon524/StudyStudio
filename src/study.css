@@ -31,3 +31,22 @@
 .study-question-header .study-retry{min-height:28px;padding:3px 0;white-space:nowrap}
 .study-question>.study-history:last-child{margin-bottom:0}
 .study-result>:last-child{margin-bottom:0!important}
+.study-option-body{flex:1;min-width:0;overflow-x:auto}
+.study-options .chem-figure{margin:.25em 0}
+.study-options .chem-structure{margin:.15em 0}
+.study-options .chem-structure>svg{margin:0}
+.study-prompt .chem-figure,.study-explanation .chem-figure,.study-reference .chem-figure,.study-flash-answer .chem-figure{max-width:100%;overflow-x:auto}
+.study-your-answer{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px}
+.study-your-answer-body{flex:1;min-width:0}
+.study-your-answer-body .markdown{font-size:inherit!important;line-height:inherit!important;display:inline}
+.study-your-answer-body .markdown>p{display:inline;margin:0}
+.study-your-answer-body .chem-figure{margin:.25em 0}
+.study-your-answer-body .chem-structure>svg{margin:0}
+.study-history-answer .markdown{font-size:inherit!important;line-height:inherit!important}
+.study-history-answer .markdown>p{margin:0}
+.study-history-answer .chem-figure{margin:.2em 0}
+.study-history-answer .chem-structure>svg{margin:0;max-height:4.5em}
+.learning-prompt-preview .chem-figure{display:inline-flex!important;align-items:center;margin:0 .25em!important;vertical-align:middle}
+.learning-prompt-preview .chem-figure .figure-loading{min-height:0!important}
+.learning-prompt-preview .chem-structure{display:inline-flex!important;align-items:center;margin:0!important;overflow:visible!important}
+.learning-prompt-preview .chem-structure>svg{height:1.65em!important;width:auto!important;max-height:1.65em!important;margin:0!important}

@@ -1,5 +1,6 @@
 import {useEffect, useMemo, useSyncExternalStore} from 'react'
 import type {PdfAnnotation} from '../shared/pdf-markup.mjs'
+import {tCurrent} from './i18n'
 
 type Status = 'loading' | 'ready' | 'saving' | 'error'
 type Snapshot = {annotations:PdfAnnotation[]; status:Status; error:string}
@@ -14,7 +15,7 @@ const cache = new Map<string, AnnotationPage>()
 async function request(url:string, init?:RequestInit){
   const response = await fetch(url,init)
   const result = await response.json()
-  if(!response.ok)throw new Error(result.error||'无法保存课件批注。')
+  if(!response.ok)throw new Error(result.error||tCurrent('pdf.annotationSaveFailed'))
   return result
 }
 
@@ -62,7 +63,7 @@ class AnnotationPage {
       for(const annotation of result.annotations)this.items.set(annotation.id,annotation)
       this.loaded=true
     }catch(error){
-      this.error=error instanceof Error?error.message:'无法读取课件批注。'
+      this.error=error instanceof Error?error.message:tCurrent('pdf.annotationSyncFailed')
     }finally{
       this.loading=false
       this.publish()
@@ -140,7 +141,7 @@ class AnnotationPage {
         if(this.pending.get(id)===operation)this.pending.delete(id)
       }
     }catch(error){
-      this.error=error instanceof Error?error.message:'无法保存课件批注。'
+      this.error=error instanceof Error?error.message:tCurrent('pdf.annotationSaveFailed')
     }finally{
       this.writing=false
       if(!this.pending.size)this.keepalive=false

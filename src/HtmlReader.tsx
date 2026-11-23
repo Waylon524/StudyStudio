@@ -3,6 +3,7 @@ import {Bookmark,Check,Code2,Copy,Download,Eye,Globe,Layers,MessageSquareQuote,R
 import {SandboxedHtmlFrame,buildStandaloneHtmlFile,type CanvasReport} from './SandboxedHtmlFrame'
 import type {Source} from './CourseContextPanel'
 import type {CanvasSpec} from './study-types'
+import {tCurrent,useI18n} from './i18n'
 import './document-reader.css'
 
 type ReadResult={text?:string;warning?:string|null;truncated?:boolean}
@@ -31,6 +32,7 @@ type CanvasProps={
 export type HtmlReaderProps=FileProps|CanvasProps
 
 export function HtmlReader(props:HtmlReaderProps){
+  const {t,folderDisplayName}=useI18n()
   const [fileHtml,setFileHtml]=useState<string|null>(null)
   const [warning,setWarning]=useState<string|null>(null)
   const [truncated,setTruncated]=useState(false)
@@ -87,7 +89,7 @@ export function HtmlReader(props:HtmlReaderProps){
     fetch(endpoint,{signal:controller.signal})
       .then(async res=>{
         const data=await res.json()
-        if(!res.ok)throw new Error(data.error||'无法读取 HTML 文件。')
+        if(!res.ok)throw new Error(data.error||tCurrent('doc.readHtmlFailed'))
         return data as ReadResult
       })
       .then(data=>{
@@ -102,7 +104,7 @@ export function HtmlReader(props:HtmlReaderProps){
       .catch(err=>{
         if(err.name==='AbortError')return
         if(!sameDoc)setFileHtml(null)
-        setError(err.message||'无法读取 HTML 文件。')
+        setError(err.message||tCurrent('doc.readHtmlFailed'))
       })
       .finally(()=>{
         if(!controller.signal.aborted){setLoading(false);setRefreshing(false)}
@@ -112,7 +114,7 @@ export function HtmlReader(props:HtmlReaderProps){
 
   const html=props.kind==='canvas'?props.canvas.html:fileHtml
   const title=props.kind==='canvas'?props.canvas.title:props.source.name
-  const subtitle=props.kind==='canvas'?'交互画布':(props.source.folder?props.source.folder.split('/').join(' / '):'')
+  const subtitle=props.kind==='canvas'?t('doc.interactiveCanvas'):(props.source.folder?folderDisplayName(props.source.folder):'')
   const visible=props.visible!==false
 
   function reload(){
@@ -124,7 +126,7 @@ export function HtmlReader(props:HtmlReaderProps){
     if(props.kind!=='canvas'||!props.onSave||localSaved||saving)return
     setSaving(true);setSaveError('')
     try{await props.onSave();setLocalSaved(true)}
-    catch(err){setSaveError(err instanceof Error?err.message:'画布暂时无法保存，请重试。')}
+    catch(err){setSaveError(err instanceof Error?err.message:t('study.canvasSaveFailed'))}
     finally{setSaving(false)}
   }
 
@@ -133,7 +135,8 @@ export function HtmlReader(props:HtmlReaderProps){
     const standalone=buildStandaloneHtmlFile(props.canvas.title,props.canvas.html)
     const blob=new Blob([standalone],{type:'text/html;charset=utf-8'})
     const url=URL.createObjectURL(blob)
-    const safeName=(props.canvas.title||'交互画布').replace(/[\/\\:*?"<>|]/g,'_').trim()||'交互画布'
+    const fallbackName=t('doc.interactiveCanvas')
+    const safeName=(props.canvas.title||fallbackName).replace(/[\/\\:*?"<>|]/g,'_').trim()||fallbackName
     const anchor=document.createElement('a')
     anchor.href=url;anchor.download=safeName.endsWith('.html')?safeName:`${safeName}.html`;anchor.hidden=true
     document.body.append(anchor);anchor.click();anchor.remove()
@@ -155,7 +158,7 @@ export function HtmlReader(props:HtmlReaderProps){
     ?(props.source.url||`/api/courses/${encodeURIComponent(props.courseId)}/sources/${encodeURIComponent(props.source.id)}/file`)+'?download=1'
     :''
 
-  return <section className="doc-reader doc-reader-html" aria-label={`阅读 HTML：${title}`}>
+  return <section className="doc-reader doc-reader-html" aria-label={t('doc.readingHtmlAria',{title})}>
     <header className="doc-reader-header">
       <span className={'doc-reader-badge '+(props.kind==='canvas'?'is-canvas':'is-html')} aria-hidden="true">
         {props.kind==='canvas'?<Layers size={15}/>:<Globe size={15}/>}
@@ -165,28 +168,28 @@ export function HtmlReader(props:HtmlReaderProps){
         {subtitle&&<span className={'doc-reader-folder'+(props.kind==='canvas'?' is-canvas':'')} title={subtitle}>{subtitle}</span>}
       </div>
       <div className="doc-reader-actions">
-        {props.kind==='canvas'&&(props.onSave||localSaved)&&<button type="button" className={'doc-reader-pill-btn'+(localSaved?' is-saved':'')} onClick={()=>void handleSaveCanvas()} disabled={localSaved||saving} title={localSaved?'已保存到练习':'保存到练习'}>
+        {props.kind==='canvas'&&(props.onSave||localSaved)&&<button type="button" className={'doc-reader-pill-btn'+(localSaved?' is-saved':'')} onClick={()=>void handleSaveCanvas()} disabled={localSaved||saving} title={localSaved?t('doc.savedToPractice'):t('study.saveToPractice')}>
           {localSaved?<Check size={14}/>:<Bookmark size={14}/>}
-          <span>{localSaved?'已保存':saving?'保存中…':'保存到练习'}</span>
+          <span>{localSaved?t('app.saved'):saving?t('app.saving'):t('study.saveToPractice')}</span>
         </button>}
-        {props.kind==='file'&&props.onAskAboutDocument&&<button type="button" className="doc-reader-pill-btn" onClick={()=>props.onAskAboutDocument?.(props.source)} title="围绕这份页面向助教提问"><MessageSquareQuote size={14}/><span>提问</span></button>}
-        {props.kind==='canvas'&&props.onAskAboutCanvas&&<button type="button" className="doc-reader-pill-btn" onClick={()=>props.onAskAboutCanvas?.(props.canvas)} title="围绕这个画布向助教提问"><MessageSquareQuote size={14}/><span>提问</span></button>}
-        <button type="button" className={'doc-reader-icon'+(viewMode==='source'?' is-active':'')} aria-label={viewMode==='preview'?'查看 HTML 源码':'返回页面预览'} title={viewMode==='preview'?'查看 HTML 源码':'返回页面预览'} onClick={()=>setViewMode(m=>m==='preview'?'source':'preview')}>{viewMode==='preview'?<Code2 size={16}/>:<Eye size={16}/>}</button>
-        {viewMode==='source'&&html!==null&&<button type="button" className="doc-reader-icon" aria-label="复制 HTML 源码" title={copied?'已复制':'复制源码'} onClick={()=>void copySource()}>{copied?<Check size={16}/>:<Copy size={15}/>}</button>}
-        <button type="button" className="doc-reader-icon" aria-label="重新运行页面" title="重新运行" disabled={loading||refreshing} onClick={reload}><RotateCcw size={15} className={refreshing?'doc-reader-spin':undefined}/></button>
-        {props.kind==='file'?<a className="doc-reader-icon" href={fileDownloadUrl} download={props.source.name} aria-label={`下载 ${props.source.name}`} title={`下载 ${props.source.name}`}><Download size={16}/></a>
-        :<button type="button" className="doc-reader-icon" onClick={downloadCanvasHtml} aria-label={`下载 ${title}.html`} title="下载独立 HTML 文件"><Download size={16}/></button>}
-        <button type="button" className="doc-reader-icon" onClick={props.onClose} aria-label="关闭阅读器" title="关闭阅读器"><X size={18}/></button>
+        {props.kind==='file'&&props.onAskAboutDocument&&<button type="button" className="doc-reader-pill-btn" onClick={()=>props.onAskAboutDocument?.(props.source)} title={t('doc.askHtmlTitle')}><MessageSquareQuote size={14}/><span>{t('doc.ask')}</span></button>}
+        {props.kind==='canvas'&&props.onAskAboutCanvas&&<button type="button" className="doc-reader-pill-btn" onClick={()=>props.onAskAboutCanvas?.(props.canvas)} title={t('doc.askCanvasTitle')}><MessageSquareQuote size={14}/><span>{t('doc.ask')}</span></button>}
+        <button type="button" className={'doc-reader-icon'+(viewMode==='source'?' is-active':'')} aria-label={viewMode==='preview'?t('doc.viewHtmlSource'):t('doc.backToPreview')} title={viewMode==='preview'?t('doc.viewHtmlSource'):t('doc.backToPreview')} onClick={()=>setViewMode(m=>m==='preview'?'source':'preview')}>{viewMode==='preview'?<Code2 size={16}/>:<Eye size={16}/>}</button>
+        {viewMode==='source'&&html!==null&&<button type="button" className="doc-reader-icon" aria-label={t('doc.copyHtmlSource')} title={copied?t('app.copied'):t('doc.copyCode')} onClick={()=>void copySource()}>{copied?<Check size={16}/>:<Copy size={15}/>}</button>}
+        <button type="button" className="doc-reader-icon" aria-label={t('doc.rerunPage')} title={t('study.rerun')} disabled={loading||refreshing} onClick={reload}><RotateCcw size={15} className={refreshing?'doc-reader-spin':undefined}/></button>
+        {props.kind==='file'?<a className="doc-reader-icon" href={fileDownloadUrl} download={props.source.name} aria-label={t('pdf.downloadNamed',{name:props.source.name})} title={t('pdf.downloadNamed',{name:props.source.name})}><Download size={16}/></a>
+        :<button type="button" className="doc-reader-icon" onClick={downloadCanvasHtml} aria-label={t('pdf.downloadNamed',{name:`${title}.html`})} title={t('doc.downloadStandaloneHtml')}><Download size={16}/></button>}
+        <button type="button" className="doc-reader-icon" onClick={props.onClose} aria-label={t('pdf.closeReader')} title={t('pdf.closeReader')}><X size={18}/></button>
       </div>
     </header>
 
     {saveError&&<div className="doc-reader-top-alert is-error" role="alert">{saveError}</div>}
-    {props.kind==='file'&&(warning||truncated)&&<div className="doc-reader-top-alert is-warn" role="status">{warning||'HTML 文件较长，当前显示前 500,000 个字符。'}</div>}
+    {props.kind==='file'&&(warning||truncated)&&<div className="doc-reader-top-alert is-warn" role="status">{warning||t('doc.htmlTruncated')}</div>}
     {props.kind==='file'&&error&&fileHtml!==null&&<div className="doc-reader-top-alert is-error" role="alert">{error}</div>}
 
     <div className="doc-reader-body">
-      {loading&&html===null?<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-status" role="status"><span className="spinner"/>正在打开 HTML 页面…</div></div>
-      :error&&html===null?<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-status is-error" role="alert"><p>{error}</p><button type="button" onClick={reload}>重新加载</button></div></div>
+      {loading&&html===null?<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-status" role="status"><span className="spinner"/>{t('doc.openingHtml')}</div></div>
+      :error&&html===null?<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-status is-error" role="alert"><p>{error}</p><button type="button" onClick={reload}>{t('app.reload')}</button></div></div>
       :viewMode==='source'?<div className="doc-reader-stage doc-reader-md-stage"><div className="doc-reader-sheet"><pre className="doc-reader-source"><code>{html||''}</code></pre></div></div>
       :html&&html.trim()?<SandboxedHtmlFrame
         className="doc-reader-html-frame"
@@ -196,13 +199,13 @@ export function HtmlReader(props:HtmlReaderProps){
         mode={props.kind==='canvas'?'canvas':'document'}
         forceActive={visible}
         paused={!visible}
-        loadingLabel={props.kind==='canvas'?'正在打开画布…':'正在渲染页面…'}
+        loadingLabel={props.kind==='canvas'?t('study.frameOpeningCanvas'):t('study.frameRenderingPage')}
         onReport={props.kind==='canvas'?props.onReport:undefined}
         onEscapeClose={()=>{if(window.innerWidth<900)props.onClose()}}
         onRetry={reload}
         onViewSource={()=>setViewMode('source')}
       />
-      :<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-empty">这份 HTML 文件目前是空的。</div></div>}
+      :<div className="doc-reader-stage doc-reader-html-stage"><div className="doc-reader-empty">{t('doc.htmlEmpty')}</div></div>}
     </div>
   </section>
 }

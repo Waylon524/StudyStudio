@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent} from 'react'
 import {AlertCircle,Archive,ArrowUpRight,BookOpen,ChevronRight,FilePenLine,FolderOpen,Plus,RotateCcw,Save,X} from 'lucide-react'
 import {CourseAvatar} from './CourseAvatar'
+import {useI18n} from './i18n'
 import {formatBytes,type ManagedCourse} from './settings-types'
 
 type MemoryEntry={id:string;text:string;category:'preferences'|'courseRules';source?:string}
@@ -19,9 +20,8 @@ type Props={
  onChanged?:(courseId:string)=>void
 }
 
-const collator=new Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})
-
 function CourseInstructionsEditor({courseId,onChanged}:{courseId:string;onChanged?:()=>void}){
+ const {t}=useI18n()
  const [data,setData]=useState<WorkspaceInstructions|null>(null)
  const [draft,setDraft]=useState('')
  const [baseline,setBaseline]=useState<{content:string;version:string}|null>(null)
@@ -36,7 +36,7 @@ function CourseInstructionsEditor({courseId,onChanged}:{courseId:string;onChange
   fetch('/api/courses/'+encodeURIComponent(courseId)+'/workspace',{signal:controller.signal})
    .then(async res=>{
     const value=await res.json()
-    if(!res.ok)throw new Error(value.error||'课程说明读取失败')
+    if(!res.ok)throw new Error(value.error||t('sc.readInstructionsFailed'))
     if(controller.signal.aborted)return
     setData({
      workspacePath:value.workspacePath||'',
@@ -50,7 +50,7 @@ function CourseInstructionsEditor({courseId,onChanged}:{courseId:string;onChange
    .catch(err=>{if(err.name!=='AbortError')setError(err.message)})
    .finally(()=>{if(!controller.signal.aborted)setLoading(false)})
   return()=>controller.abort()
- },[courseId])
+ },[courseId,t])
 
  async function save(){
   if(!baseline||saving||draft===baseline.content)return
@@ -62,12 +62,12 @@ function CourseInstructionsEditor({courseId,onChanged}:{courseId:string;onChange
     body:JSON.stringify({content:draft,version:baseline.version})
    })
    const value=await res.json()
-   if(!res.ok)throw new Error(value.error||'课程说明保存失败')
+   if(!res.ok)throw new Error(value.error||t('sc.saveInstructionsFailed'))
    setBaseline({content:draft,version:value.instructionsVersion||value.version||baseline.version})
    setSaved(true)
    onChanged?.()
   }catch(err:any){
-   setError(err.message||'课程说明保存失败')
+   setError(err.message||t('sc.saveInstructionsFailed'))
   }finally{
    setSaving(false)
   }
@@ -77,35 +77,36 @@ function CourseInstructionsEditor({courseId,onChanged}:{courseId:string;onChange
 
  return <div className="sc-instructions">
   {error&&<div className="settings-alert is-error" role="alert"><AlertCircle size={14}/><span>{error}</span></div>}
-  {loading?<div className="settings-state-loading"><span className="spinner"/>正在读取课程说明…</div>:data&&<>
+  {loading?<div className="settings-state-loading"><span className="spinner"/>{t('sc.loadingInstructions')}</div>:data&&<>
    <div className="sc-instructions-head">
     <div>
-     <strong>课程学习约定（AGENTS.md）</strong>
-     <p>每次对话前自动读取，可用于指定教材风格、公式记号、重点方向或讲解深度。</p>
+     <strong>{t('sc.instructionsTitle')}</strong>
+     <p>{t('sc.instructionsDesc')}</p>
     </div>
     <button type="button" className="settings-btn-primary-xs" disabled={saving||!dirty} onClick={()=>void save()}>
-     <Save size={12}/>{saving?'保存中…':saved&&!dirty?'已保存':'保存说明'}
+     <Save size={12}/>{saving?t('app.saving'):saved&&!dirty?t('app.saved'):t('sc.saveInstructions')}
     </button>
    </div>
    <textarea
-    aria-label="课程说明 AGENTS.md"
+    aria-label={t('sc.instructionsAria')}
     spellCheck={false}
     value={draft}
     onChange={event=>{setDraft(event.target.value);setSaved(false)}}
     onKeyDown={event=>{if(event.key==='Escape')event.stopPropagation()}}
    />
    {data.memory.length>0&&<div className="sc-memory-box">
-    <span className="sc-memory-title">已记录的学习偏好与课程规则（{data.memory.length}）</span>
+    <span className="sc-memory-title">{t('sc.memoryTitle',{count:data.memory.length})}</span>
     <ul>
-     {data.memory.map(item=><li key={item.id}><span className="sc-memory-tag">{item.category==='preferences'?'偏好':'规则'}</span><span>{item.text}</span></li>)}
+     {data.memory.map(item=><li key={item.id}><span className="sc-memory-tag">{item.category==='preferences'?t('sc.memoryPreference'):t('sc.memoryRule')}</span><span>{item.text}</span></li>)}
     </ul>
    </div>}
-   {data.workspacePath&&<p className="sc-workspace-path" title={data.workspacePath}>目录：{data.workspacePath}</p>}
+   {data.workspacePath&&<p className="sc-workspace-path" title={data.workspacePath}>{t('sc.dirPrefix',{path:data.workspacePath})}</p>}
   </>}
  </div>
 }
 
 export function SettingsCourses({courses,activeCourseId,conversationBusy,loading=false,loadError='',onCreate,onArchive,onOpen,onManageMaterials,onChanged}:Props){
+ const {t,collator,courseDisplayName}=useI18n()
  const [adding,setAdding]=useState(false)
  const [name,setName]=useState('')
  const [pending,setPending]=useState<string|null>(null)
@@ -119,16 +120,16 @@ export function SettingsCourses({courses,activeCourseId,conversationBusy,loading
   if(b.id===activeCourseId)return 1
   if(a.id==='general')return -1
   if(b.id==='general')return 1
-  return collator.compare(a.name,b.name)
+  return collator.compare(courseDisplayName(a),courseDisplayName(b))
  })
- const archived=courses.filter(course=>!!course.archivedAt).sort((a,b)=>collator.compare(a.name,b.name))
+ const archived=courses.filter(course=>!!course.archivedAt).sort((a,b)=>collator.compare(courseDisplayName(a),courseDisplayName(b)))
 
  useEffect(()=>{if(adding)nameInput.current?.focus()},[adding])
 
  async function perform(key:string,action:()=>Promise<void>|void){
   if(pending)return
   setError('');setPending(key)
-  try{await action()}catch(err){setError((err as Error).message||'操作未完成，请重试。')}
+  try{await action()}catch(err){setError((err as Error).message||t('app.operationFailed'))}
   finally{setPending(null)}
  }
 
@@ -149,29 +150,29 @@ export function SettingsCourses({courses,activeCourseId,conversationBusy,loading
 
  return <div className="sc-root">
   <div className="sc-topbar">
-   <p className="sc-subtitle">共 {active.length} 门活跃课程{archived.length>0?`，${archived.length} 门已归档`:''}。点击课程头像可重新生成专属图标。</p>
+   <p className="sc-subtitle">{t('sc.subtitle',{active:active.length,archived:archived.length>0?t('sc.subtitleArchived',{count:archived.length}):''})}</p>
    <button type="button" className="settings-btn-accent" aria-expanded={adding} disabled={!!pending||loading} onClick={()=>{setAdding(v=>!v);setError('')}}>
-    <Plus size={14}/>添加课程
+    <Plus size={14}/>{t('sc.addCourse')}
    </button>
   </div>
 
   {adding&&<form className="sc-create-card" onSubmit={handleCreate}>
    <input
     ref={nameInput}
-    aria-label="课程名称"
-    placeholder="输入新课程名称，例如：有机化学、线性代数…"
+    aria-label={t('sc.courseNameAria')}
+    placeholder={t('sc.courseNamePlaceholder')}
     value={name}
     maxLength={80}
     disabled={!!pending||loading}
     onChange={event=>setName(event.target.value)}
     onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setAdding(false)}}}
    />
-   <button type="submit" className="settings-btn-primary" disabled={!name.trim()||!!pending||loading}>{pending==='create'?'正在添加…':'创建课程'}</button>
-   <button type="button" className="settings-btn-ghost" disabled={!!pending||loading} onClick={()=>setAdding(false)}>取消</button>
+   <button type="submit" className="settings-btn-primary" disabled={!name.trim()||!!pending||loading}>{pending==='create'?t('sc.creating'):t('sc.createCourse')}</button>
+   <button type="button" className="settings-btn-ghost" disabled={!!pending||loading} onClick={()=>setAdding(false)}>{t('app.cancel')}</button>
   </form>}
 
-  {(error||loadError)&&<div className="settings-alert is-error" role="alert"><AlertCircle size={15}/><span>{error||loadError}</span><button type="button" aria-label="关闭错误" onClick={()=>setError('')}><X size={13}/></button></div>}
-  {loading&&!courses.length&&<div className="settings-state-loading" role="status"><span className="spinner"/>正在读取课程…</div>}
+  {(error||loadError)&&<div className="settings-alert is-error" role="alert"><AlertCircle size={15}/><span>{error||loadError}</span><button type="button" aria-label={t('app.closeError')} onClick={()=>setError('')}><X size={13}/></button></div>}
+  {loading&&!courses.length&&<div className="settings-state-loading" role="status"><span className="spinner"/>{t('sc.loadingCourses')}</div>}
 
   <div className="sc-list">
    {active.map(course=>{
@@ -179,58 +180,59 @@ export function SettingsCourses({courses,activeCourseId,conversationBusy,loading
     const instructionsOpen=editingInstructionsId===course.id
     const confirmingArchive=confirmArchiveId===course.id
     const stats=course.stats
+    const displayName=courseDisplayName(course)
     return <article key={course.id} className={'sc-card'+(current?' is-current':'')+(instructionsOpen?' is-expanded':'')}>
      <div className="sc-card-main">
       <div className="sc-avatar-wrap">
-       <CourseAvatar courseId={course.id} size={36} label={`更换「${course.name}」的课程头像`}/>
+       <CourseAvatar courseId={course.id} size={36} label={t('avatar.changeFor',{name:displayName})}/>
       </div>
       <div className="sc-info">
        <div className="sc-title-row">
-        <h3>{course.name}</h3>
-        {current&&<span className="sc-badge-current">当前课程</span>}
-        {course.id==='general'&&<span className="sc-badge-muted">默认</span>}
+        <h3>{displayName}</h3>
+        {current&&<span className="sc-badge-current">{t('sc.currentBadge')}</span>}
+        {course.id==='general'&&<span className="sc-badge-muted">{t('app.defaultTag')}</span>}
        </div>
        <p className="sc-meta sm-tabular">
-        {stats?`${stats.coursewareCount} 份课件 · ${stats.materialCount} 份资料 · ${formatBytes(stats.totalBytes)}`:'学习工作区已就绪'}
+        {stats?t('sc.statsLine',{courseware:stats.coursewareCount,materials:stats.materialCount,questions:stats.questionCount??0,bytes:formatBytes(stats.totalBytes)}):t('sc.workspaceReady')}
        </p>
       </div>
       <div className="sc-actions">
        <button type="button" className="sc-action-btn" disabled={!!pending||loading||(conversationBusy&&!current)} onClick={()=>void perform('open:'+course.id,()=>onOpen(course.id))}>
-        <ArrowUpRight size={13}/>{current?'返回对话':'进入课程'}
+        <ArrowUpRight size={13}/>{current?t('sc.backToChat'):t('sc.openCourse')}
        </button>
        <button type="button" className="sc-action-btn" disabled={!!pending||loading} onClick={()=>onManageMaterials(course.id)}>
-        <FolderOpen size={13}/>管理资料
+        <FolderOpen size={13}/>{t('sc.manageMaterials')}
        </button>
        <button type="button" className={'sc-action-btn'+(instructionsOpen?' is-active':'')} aria-expanded={instructionsOpen} disabled={!!pending||loading} onClick={()=>{setEditingInstructionsId(instructionsOpen?null:course.id);setConfirmArchiveId(null)}}>
-        <FilePenLine size={13}/>课程说明
+        <FilePenLine size={13}/>{t('sc.instructions')}
        </button>
        {course.id!=='general'&&(confirmingArchive?<div className="sm-inline-confirm">
-        <button type="button" className="is-danger" disabled={!!pending||loading||(current&&conversationBusy)} onClick={()=>handleArchive(course,true)}>{pending===course.id?'处理中…':'确认归档'}</button>
-        <button type="button" onClick={()=>setConfirmArchiveId(null)}>取消</button>
-       </div>:<button type="button" className="sc-action-btn is-subtle" disabled={!!pending||loading||(current&&conversationBusy)} title={current&&conversationBusy?'回复完成后可归档':'归档后移出课程列表，资料与对话保留'} onClick={()=>{setConfirmArchiveId(course.id);setEditingInstructionsId(null)}}>
-        <Archive size={13}/>归档
+        <button type="button" className="is-danger" disabled={!!pending||loading||(current&&conversationBusy)} onClick={()=>handleArchive(course,true)}>{pending===course.id?t('sc.processing'):t('sc.confirmArchive')}</button>
+        <button type="button" onClick={()=>setConfirmArchiveId(null)}>{t('app.cancel')}</button>
+       </div>:<button type="button" className="sc-action-btn is-subtle" disabled={!!pending||loading||(current&&conversationBusy)} title={current&&conversationBusy?t('sc.archiveBusyTitle'):t('sc.archiveTitle')} onClick={()=>{setConfirmArchiveId(course.id);setEditingInstructionsId(null)}}>
+        <Archive size={13}/>{t('sc.archive')}
        </button>)}
       </div>
      </div>
-     {confirmingArchive&&<p className="sc-archive-note">归档后将从主界面课程列表中隐藏，所有资料、课件和对话记录均完整保留，随时可恢复。</p>}
+     {confirmingArchive&&<p className="sc-archive-note">{t('sc.archiveNote')}</p>}
      {instructionsOpen&&<CourseInstructionsEditor courseId={course.id} onChanged={()=>onChanged?.(course.id)}/>}
     </article>
    })}
   </div>
 
   {!loading&&<details className="sc-archived" open={archived.length>0&&active.length<=2}>
-   <summary><ChevronRight size={14}/><span>已归档课程</span><small>{archived.length}</small></summary>
+   <summary><ChevronRight size={14}/><span>{t('sc.archivedSection')}</span><small>{archived.length}</small></summary>
    <div className="sc-archived-list">
     {archived.length?archived.map(course=><div key={course.id} className="sc-archived-row">
      <BookOpen size={16}/>
      <div className="sc-archived-info">
-      <strong>{course.name}</strong>
-      {course.stats&&<span className="sm-tabular">{course.stats.coursewareCount} 份课件 · {course.stats.materialCount} 份资料 · {formatBytes(course.stats.totalBytes)}</span>}
+      <strong>{courseDisplayName(course)}</strong>
+      {course.stats&&<span className="sm-tabular">{t('sc.statsLine',{courseware:course.stats.coursewareCount,materials:course.stats.materialCount,questions:course.stats.questionCount??0,bytes:formatBytes(course.stats.totalBytes)})}</span>}
      </div>
      <button type="button" className="settings-btn-secondary-xs" disabled={!!pending||loading} onClick={()=>handleArchive(course,false)}>
-      <RotateCcw size={12}/>{pending===course.id?'正在恢复…':'恢复课程'}
+      <RotateCcw size={12}/>{pending===course.id?t('sc.restoring'):t('sc.restoreCourse')}
      </button>
-    </div>):<p className="sc-archived-empty">暂无归档课程。完成一学期的课程后可在此归档保存。</p>}
+    </div>):<p className="sc-archived-empty">{t('sc.archivedEmpty')}</p>}
    </div>
   </details>}
  </div>

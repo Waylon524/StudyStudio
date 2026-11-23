@@ -14,3 +14,4 @@ export function chemicalEquationFromMath(source: string): {kind: 'equation'; sou
 export function formatChemicalSpecies(source: string): string;
 export function formatChemicalCondition(source: string): string;
 export function parseChemicalEquation(source: string): EquationRouteSpec;
+export function parseChemicalFormula(source: string): EquationRouteSpec;

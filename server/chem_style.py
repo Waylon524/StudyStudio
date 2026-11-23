@@ -7,11 +7,13 @@ from xml.etree import ElementTree as ET
 
 import cairocffi as cairo
 from codex_organic_chem import figure_style, mechanism_scene, route_figure
+from chem_annotations import compute_clean_2d_coords, decorate_depiction, prepare_molecule_spec
 from chem_arrows import graphics
 from chem_reagents import reagent_parts
 from codex_organic_chem.figure_audit import FigureElement
 from rdkit import Chem
 from rdkit.Chem import rdDepictor
+from rdkit.Chem.Draw import rdMolDraw2D
 
 FONT = 13.0
 SCRIPT = 8.0
@@ -20,8 +22,8 @@ LINE = 0.8
 TNR = '/System/Library/Fonts/Supplemental/Times New Roman.ttf'
 NS = 'http://www.w3.org/2000/svg'
 ET.register_namespace('', NS)
-SUB = dict(zip('₀₁₂₃₄₅₆₇₈₉₊₋', '0123456789+-'))
-SUP = dict(zip('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻', '0123456789+-'))
+SUB = dict(zip('₀₁₂₃₄₅₆₇₈₉₊₋₍₎', '0123456789+-()'))
+SUP = dict(zip('⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾•', '0123456789+-()•'))
 _context = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
 _modes = deque()
 _arrow_geometry = []
@@ -90,6 +92,7 @@ _native_render = figure_style.render_molecule
 _drawer = figure_style.rdMolDraw2D.MolDraw2DSVG
 _prepare_and_draw = figure_style.rdMolDraw2D.PrepareAndDrawMolecule
 _prepare = route_figure._prepare_row
+_prepare_mol_item = route_figure._prepare_molecule
 _compose = route_figure._compose_svg
 
 
@@ -110,9 +113,10 @@ def prepare_and_draw(drawer, mol, *args, **kwargs):
 
 def compact_molecule(smiles=None, molfile=None, preset=None, **kwargs):
     settings = dict(preset) if isinstance(preset, dict) else figure_style.resolve_preset(preset)
+    explicit_methyl = bool(kwargs.pop('explicit_methyl', False))
     settings.update(cell_padding=2.5, bond_line_width=LINE, bond_length_px=BOND,
                     min_font_size=13, max_font_size=13, base_font_size=.6,
-                    explicit_methyl=False, monochrome=True)
+                    explicit_methyl=explicit_methyl, monochrome=True)
     mol = kwargs.pop('mol', None)
     if mol is None:
         mol = figure_style.prepare_mol(smiles=smiles, molfile=molfile)
@@ -126,6 +130,48 @@ def compact_molecule(smiles=None, molfile=None, preset=None, **kwargs):
         if not usable_coordinates(mol):
             raise ValueError('Unable to generate finite molecule coordinates.')
     return _native_render(mol=mol, preset=settings, **kwargs)
+
+
+def prepare_molecule_item(raw, preset):
+    smiles = raw.get('smiles')
+    molfile = raw.get('molfile')
+    if not smiles and not molfile:
+        raise ValueError("Molecule route figure item requires 'smiles' or 'molfile'.")
+    if not smiles or molfile:
+        return _prepare_mol_item(raw, preset)
+    record = route_figure.normalize_structure(smiles=smiles, molfile=None, source='route_figure').to_dict()
+    if not record.get('canonical_smiles') and not record.get('molfile'):
+        raise ValueError(f"Invalid molecule for route figure item {raw.get('id') or raw.get('label') or '<unnamed>'}.")
+    has_options = any(raw.get(k) is not None for k in ('explicit_h', 'show_carbons', 'explicit_methyl', 'hide_atom_maps', 'annotations'))
+    spec = {
+        'smiles': smiles,
+        'explicit_h': raw.get('explicit_h'),
+        'show_carbons': raw.get('show_carbons'),
+        'explicit_methyl': raw.get('explicit_methyl'),
+        'hide_atom_maps': raw.get('hide_atom_maps'),
+        'annotations': raw.get('annotations'),
+    } if has_options else smiles
+    try:
+        mol, opts_meta = prepare_molecule_spec(spec)
+        compute_clean_2d_coords(mol, target_bond_units=1.0)
+        mol = rdMolDraw2D.PrepareMolForDrawing(mol)
+        depiction = compact_molecule(mol=mol, preset=preset, explicit_methyl=opts_meta['explicit_methyl'])
+        if opts_meta['annotations']:
+            depiction = decorate_depiction(depiction, mol, opts_meta['annotations'])
+    except ValueError as exc:
+        raise ValueError(
+            f"RDKit could not draw route figure item {raw.get('id') or raw.get('label') or '<unnamed>'}: {exc}"
+        ) from exc
+    return {
+        'type': 'molecule',
+        'id': str(raw.get('id') or raw.get('code') or raw.get('label') or ''),
+        'label': str(raw.get('label') or raw.get('title') or raw.get('id') or ''),
+        'code': str(raw.get('code') or raw.get('id') or ''),
+        'width': max(depiction.width, route_figure.MIN_MOL_CELL),
+        'height': depiction.height,
+        'depiction': depiction,
+        'record': record,
+    }
 
 
 def usable_coordinates(mol):
@@ -335,6 +381,7 @@ def install():
     route_figure.TOP_MARGIN, route_figure.LEFT_MARGIN, route_figure.RIGHT_MARGIN = 14, 4, 4
     route_figure.MIN_MOL_CELL = 24
     route_figure._prepare_row = prepare
+    route_figure._prepare_molecule = prepare_molecule_item
     route_figure._arrow_width_for = arrow_width
     route_figure._arrow_svg = arrow
     route_figure._compose_svg = compose

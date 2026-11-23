@@ -4,13 +4,14 @@ import type {Annotation,AnnotationPatch,AnnotationRef} from '@embedpdf/engine-co
 import {HistoryToken} from '@embedpdf/react/history'
 import {checkedPdfAnnotation} from '../shared/pdf-markup.mjs'
 import {EMBED_PDF_EDITABLE_KINDS,embedAnnotationKey,embedRefKey,embedToStoredAnnotation,managedAnnotationId,managedAnnotationName,nativeAnnotationFields,stableAnnotationJson,storedToEmbedAnnotation,supportedEmbedAnnotation,type PdfPageGeometry,type StoredPdfAnnotation} from './embedPdfAnnotationMapping'
+import {tCurrent} from './i18n'
 
 export type EmbedPdfAnnotationUpdate={sourceId:string;page:number;revision:number}
 type Props={viewer:Viewer|null;courseId:string;sourceId:string;annotationUpdates?:EmbedPdfAnnotationUpdate}
 type State={status:'loading'|'ready'|'saving'|'error';error:string}
 type Change={sourceId:string;page:number;op:'upsert';annotation:StoredPdfAnnotation}|{sourceId:string;page:number;op:'delete';id:string}
 const writers=new Map<string,AnnotationWriter>()
-async function request(url:string,init?:RequestInit){const response=await fetch(url,init),value=await response.json();if(!response.ok)throw Error(value.error||'课件批注保存失败，请重试。');return value}
+async function request(url:string,init?:RequestInit){const response=await fetch(url,init),value=await response.json();if(!response.ok)throw Error(value.error||tCurrent('pdf.annotationSaveFailed'));return value}
 
 /** The last edit of each id survives viewer disposal and is sent in order. */
 class AnnotationWriter{
@@ -33,7 +34,7 @@ class AnnotationWriter{
  }
  overlay(page:number,records:StoredPdfAnnotation[]){const merged=new Map(records.map(record=>[record.id,record]));for(const {change} of this.pending.values())if(change.page===page){if(change.op==='delete')merged.delete(change.id);else merged.set(change.annotation.id,change.annotation)}return [...merged.values()]}
  private schedule(){clearTimeout(this.timer);if(this.writing||this.error||!this.pending.size)return;const at=Math.min(...[...this.pending.values()].map(item=>item.at));if(at>Date.now())this.timer=setTimeout(()=>this.schedule(),at-Date.now());else void this.write()}
- private async write(){this.writing=true;this.publish();try{while(this.pending.size){const entry=[...this.pending].find(([,item])=>item.at<=Date.now());if(!entry)break;const [id,item]=entry;await request(this.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.change),keepalive:this.keepalive});if(this.pending.get(id)===item)this.pending.delete(id)}}catch(error){this.error=error instanceof Error?error.message:'课件批注保存失败，请重试。'}finally{this.writing=false;if(!this.pending.size)this.keepalive=false;this.publish();this.schedule()}}
+ private async write(){this.writing=true;this.publish();try{while(this.pending.size){const entry=[...this.pending].find(([,item])=>item.at<=Date.now());if(!entry)break;const [id,item]=entry;await request(this.endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item.change),keepalive:this.keepalive});if(this.pending.get(id)===item)this.pending.delete(id)}}catch(error){this.error=error instanceof Error?error.message:tCurrent('pdf.annotationSaveFailed')}finally{this.writing=false;if(!this.pending.size)this.keepalive=false;this.publish();this.schedule()}}
 }
 function writerFor(courseId:string,sourceId:string){const key=courseId+':'+sourceId;let writer=writers.get(key);if(!writer){writer=new AnnotationWriter('/api/courses/'+encodeURIComponent(courseId)+'/pdf-annotations');writers.set(key,writer)}if(writers.size>32)for(const [oldKey,old] of writers)if(oldKey!==key&&!old.pending.size&&!old.writing&&!old.listeners.size){writers.delete(oldKey);if(writers.size<=32)break}return writer}
 
@@ -56,7 +57,7 @@ export function useEmbedPdfAnnotations({viewer,courseId,sourceId,annotationUpdat
    const geometry=(page:number):PdfPageGeometry|null=>{const box=stage.getPageBox(page-1);if(!box)return null;const scale=box.transform.viewScale;if(!scale)return null;return {ref:box.ref,index:page-1,width:box.transform.contentWidth/scale,height:box.transform.contentHeight/scale,rotation:(box.rotation-stage.getViewRotation()+360)%360}}
    const pageOf=(annotation:Pick<Annotation,'page'>)=>{for(let index=0;index<stage.getPageCount();index++){const box=stage.getPageBox(index);if(box?.ref.objectNumber===annotation.page.objectNumber)return index+1}return null}
    const currentPages=()=>[...new Set([stage.getCurrentPageIndex()+1,...stage.listVisiblePages().map(page=>page.pageIndex+1)])].filter(page=>page>0)
-   const report=(error:unknown)=>{if(!live)return;loadError=error instanceof Error?error.message:'课件批注暂时无法同步，请重试。';publish()}
+   const report=(error:unknown)=>{if(!live)return;loadError=error instanceof Error?error.message:tCurrent('pdf.annotationSyncFailed');publish()}
    const bind=(annotation:Annotation,id:string,page:number)=>{const key=embedAnnotationKey(annotation);for(const [oldKey,entry] of refs)if(oldKey!==key&&entry.id===id&&entry.page===page)refs.delete(oldKey);refs.set(key,{ref:annotation.ref,id,page});if(annotation.nm)ownedNames.set(page+':'+annotation.nm,{id,page});nativeSignatures.set(id,stableAnnotationJson(nativeAnnotationFields(annotation)))}
    const changed=(page:number)=>localRevisions.set(page,(localRevisions.get(page)||0)+1)
    const saveLocal=(annotation:Annotation)=>{
@@ -142,7 +143,7 @@ export function useEmbedPdfAnnotations({viewer,courseId,sourceId,annotationUpdat
 export async function flushEmbedPdfAnnotations({viewer,courseId,sourceId,signal}:{viewer:Viewer|null;courseId:string;sourceId:string;signal?:AbortSignal}):Promise<void>{
  signal?.throwIfAborted()
  const api=viewer?.tryGet('annotation')
- if(viewer&&(!api||api.getStatus()!=='ready'))throw Error('课件还没有准备好，请稍后再导出。')
+ if(viewer&&(!api||api.getStatus()!=='ready'))throw Error(tCurrent('pdf.annotationNotReady'))
  if(api){
   if(api.text.getEditing())await api.text.end({signal})
   // The supported export call waits for queued native writes without changing

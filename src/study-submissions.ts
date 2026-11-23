@@ -1,3 +1,5 @@
+import {tCurrent} from './i18n'
+
 type SubmissionState = {
   pending: Set<Promise<unknown>>
   failures: Map<string, unknown>
@@ -33,7 +35,7 @@ export async function waitForStudySubmissions(courseId:string):Promise<void> {
     // Report a failed save once rather than permanently locking the conversation.
     const failed=state.failures.size>0
     state.failures.clear();clean(courseId,state)
-    if(failed)throw Error('刚才的作答未能保存，消息尚未发送。请在题目中重试后再发送。')
+    if(failed)throw Error(tCurrent('study.submissionFailed'))
     return
   }
 }

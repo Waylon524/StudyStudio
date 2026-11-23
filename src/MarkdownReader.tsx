@@ -2,6 +2,7 @@ import {useEffect,useRef,useState} from 'react'
 import {BookOpen,Check,Code2,Copy,Download,FileText,ListTree,MessageSquareQuote,RotateCcw,X} from 'lucide-react'
 import {Markdown} from './Markdown'
 import type {Source} from './CourseContextPanel'
+import {tCurrent,useI18n} from './i18n'
 import './document-reader.css'
 
 type HeadingItem={index:number;level:number;text:string}
@@ -17,6 +18,7 @@ type Props={
 }
 
 export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,onAskAboutDocument}:Props){
+  const {t,folderDisplayName}=useI18n()
   const [content,setContent]=useState<string|null>(null)
   const [warning,setWarning]=useState<string|null>(null)
   const [truncated,setTruncated]=useState(false)
@@ -52,7 +54,7 @@ export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,
     fetch(endpoint,{signal:controller.signal})
       .then(async res=>{
         const data=await res.json()
-        if(!res.ok)throw new Error(data.error||'无法读取 Markdown 文件。')
+        if(!res.ok)throw new Error(data.error||tCurrent('doc.readMdFailed'))
         return data as ReadResult
       })
       .then(data=>{
@@ -66,7 +68,7 @@ export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,
       .catch(err=>{
         if(err.name==='AbortError')return
         if(!sameDoc)setContent(null)
-        setError(err.message||'无法读取 Markdown 文件。')
+        setError(err.message||tCurrent('doc.readMdFailed'))
       })
       .finally(()=>{
         if(!controller.signal.aborted){setLoading(false);setRefreshing(false)}
@@ -100,9 +102,9 @@ export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,
     }catch{}
   }
 
-  const folderLabel=source.folder?source.folder.split('/').join(' / '):''
+  const folderLabel=source.folder?folderDisplayName(source.folder):''
 
-  return <section className="doc-reader doc-reader-md" aria-label={`阅读 Markdown：${source.name}`}>
+  return <section className="doc-reader doc-reader-md" aria-label={t('doc.readingMdAria',{name:source.name})}>
     <header className="doc-reader-header">
       <span className="doc-reader-badge is-markdown" aria-hidden="true"><FileText size={15}/></span>
       <div className="doc-reader-heading">
@@ -110,19 +112,19 @@ export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,
         {folderLabel&&<span className="doc-reader-folder" title={folderLabel}>{folderLabel}</span>}
       </div>
       <div className="doc-reader-actions">
-        {onAskAboutDocument&&<button type="button" className="doc-reader-pill-btn" onClick={()=>onAskAboutDocument(source)} title="围绕这份文档向助教提问"><MessageSquareQuote size={14}/><span>提问</span></button>}
-        {viewMode==='preview'&&headings.length>=2&&<button type="button" className={'doc-reader-icon'+(outlineOpen?' is-active':'')} aria-label="文档目录" title="文档目录" aria-expanded={outlineOpen} onClick={()=>setOutlineOpen(v=>!v)}><ListTree size={16}/></button>}
-        <button type="button" className={'doc-reader-icon'+(viewMode==='source'?' is-active':'')} aria-label={viewMode==='preview'?'查看 Markdown 原文':'返回阅读视图'} title={viewMode==='preview'?'查看 Markdown 原文':'返回阅读视图'} onClick={()=>setViewMode(m=>m==='preview'?'source':'preview')}>{viewMode==='preview'?<Code2 size={16}/>:<BookOpen size={16}/>}</button>
-        {viewMode==='source'&&content!==null&&<button type="button" className="doc-reader-icon" aria-label="复制 Markdown 原文" title={copied?'已复制':'复制原文'} onClick={()=>void copyContent()}>{copied?<Check size={16}/>:<Copy size={15}/>}</button>}
-        <button type="button" className="doc-reader-icon" aria-label="刷新文档" title="刷新文档" disabled={loading||refreshing} onClick={()=>setReloadCount(v=>v+1)}><RotateCcw size={15} className={refreshing?'doc-reader-spin':undefined}/></button>
-        <a className="doc-reader-icon" href={downloadUrl} download={source.name} aria-label={`下载 ${source.name}`} title={`下载 ${source.name}`}><Download size={16}/></a>
-        <button type="button" className="doc-reader-icon" onClick={onClose} aria-label="关闭阅读器" title="关闭阅读器"><X size={18}/></button>
+        {onAskAboutDocument&&<button type="button" className="doc-reader-pill-btn" onClick={()=>onAskAboutDocument(source)} title={t('doc.askMdTitle')}><MessageSquareQuote size={14}/><span>{t('doc.ask')}</span></button>}
+        {viewMode==='preview'&&headings.length>=2&&<button type="button" className={'doc-reader-icon'+(outlineOpen?' is-active':'')} aria-label={t('doc.outline')} title={t('doc.outline')} aria-expanded={outlineOpen} onClick={()=>setOutlineOpen(v=>!v)}><ListTree size={16}/></button>}
+        <button type="button" className={'doc-reader-icon'+(viewMode==='source'?' is-active':'')} aria-label={viewMode==='preview'?t('doc.viewMdSource'):t('doc.backToReading')} title={viewMode==='preview'?t('doc.viewMdSource'):t('doc.backToReading')} onClick={()=>setViewMode(m=>m==='preview'?'source':'preview')}>{viewMode==='preview'?<Code2 size={16}/>:<BookOpen size={16}/>}</button>
+        {viewMode==='source'&&content!==null&&<button type="button" className="doc-reader-icon" aria-label={t('doc.copyMdSource')} title={copied?t('app.copied'):t('doc.copySource')} onClick={()=>void copyContent()}>{copied?<Check size={16}/>:<Copy size={15}/>}</button>}
+        <button type="button" className="doc-reader-icon" aria-label={t('doc.refreshDoc')} title={t('doc.refreshDoc')} disabled={loading||refreshing} onClick={()=>setReloadCount(v=>v+1)}><RotateCcw size={15} className={refreshing?'doc-reader-spin':undefined}/></button>
+        <a className="doc-reader-icon" href={downloadUrl} download={source.name} aria-label={t('pdf.downloadNamed',{name:source.name})} title={t('pdf.downloadNamed',{name:source.name})}><Download size={16}/></a>
+        <button type="button" className="doc-reader-icon" onClick={onClose} aria-label={t('pdf.closeReader')} title={t('pdf.closeReader')}><X size={18}/></button>
       </div>
     </header>
 
     <div className="doc-reader-body">
-      {outlineOpen&&viewMode==='preview'&&headings.length>=2&&<aside className="doc-reader-outline" aria-label="文档目录">
-        <div className="doc-reader-outline-title">目录</div>
+      {outlineOpen&&viewMode==='preview'&&headings.length>=2&&<aside className="doc-reader-outline" aria-label={t('doc.outline')}>
+        <div className="doc-reader-outline-title">{t('doc.outlineHeading')}</div>
         <ul>
           {headings.map(item=><li key={item.index} className={'level-'+item.level}>
             <button type="button" title={item.text} onClick={()=>scrollToHeading(item.index)}>{item.text}</button>
@@ -131,16 +133,16 @@ export function MarkdownReader({courseId,source,revision=0,onClose,onOpenSource,
       </aside>}
 
       <div className="doc-reader-stage doc-reader-md-stage" ref={stageRef}>
-        {loading&&content===null?<div className="doc-reader-status" role="status"><span className="spinner"/>正在打开 Markdown 文档…</div>
-        :error&&content===null?<div className="doc-reader-status is-error" role="alert"><p>{error}</p><button type="button" onClick={()=>setReloadCount(v=>v+1)}>重新加载</button></div>
+        {loading&&content===null?<div className="doc-reader-status" role="status"><span className="spinner"/>{t('doc.openingMd')}</div>
+        :error&&content===null?<div className="doc-reader-status is-error" role="alert"><p>{error}</p><button type="button" onClick={()=>setReloadCount(v=>v+1)}>{t('app.reload')}</button></div>
         :<div className="doc-reader-sheet">
           {error&&<div className="doc-reader-notice is-error" role="alert">{error}</div>}
-          {(warning||truncated)&&<div className="doc-reader-notice is-warn" role="status">{warning||'文档内容较长，当前显示前 500,000 个字符。'}</div>}
+          {(warning||truncated)&&<div className="doc-reader-notice is-warn" role="status">{warning||t('doc.mdTruncated')}</div>}
           {viewMode==='source'?<pre className="doc-reader-source"><code>{content||''}</code></pre>
           :content&&content.trim()?<article className="doc-reader-markdown" ref={articleRef}>
             <Markdown text={content} allowStudy={false} onOpenSource={onOpenSource}/>
           </article>
-          :<div className="doc-reader-empty">这份 Markdown 文档目前是空的。</div>}
+          :<div className="doc-reader-empty">{t('doc.mdEmpty')}</div>}
         </div>}
       </div>
     </div>

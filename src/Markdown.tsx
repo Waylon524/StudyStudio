@@ -10,9 +10,10 @@ import 'katex/dist/katex.min.css'
 import {LiveStudyBlock} from './StudyComponents'
 import './chemistry-layout.css'
 import {ChemistrySvg} from './ChemistrySvg'
+import {chemistryRenderQueue,type FigureResult} from './chemistry-client'
 import {chemicalEquationFromMath} from '../shared/chemical-equation.mjs'
-import {createChemistryRenderQueue} from '../shared/chemistry-render-queue.mjs'
 import {useNearViewport} from './useNearViewport'
+import {tCurrent,useI18n} from './i18n'
 
 const StreamContext = createContext(false)
 const StudyAllowedContext = createContext(true)
@@ -27,30 +28,24 @@ export function parseStudySource(value:string): {id:string;page?:number}|null {
 export function studyUrlTransform(value:string):string {
   return parseStudySource(value) ? value : defaultUrlTransform(value)
 }
-type FigureResult = {status:string;svg?:string;warnings?:string[];validation?:unknown;trace?:unknown;error?:string}
-const figures=createChemistryRenderQueue<FigureResult>(async(kind,source)=>{
-  const input=['reaction','mechanism'].includes(kind)&&source.trim().startsWith('{')?JSON.parse(source):source
-  const res=await fetch('/api/chem/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,source:input})})
-  const result=await res.json()
-  if(!res.ok)throw new Error(result.error||result.warnings?.[0]||'绘图请求失败')
-  return result
-})
 export function ChemistryFigure({kind,source,inline=false,ready=true}:{kind:string;source:string;inline?:boolean;ready?:boolean}) {
+  const {locale,t}=useI18n()
   const key=kind+':'+source,{ref,near}=useNearViewport(ready)
-  const [state,setState]=useState<{key:string;result?:FigureResult;error?:string}>(()=>({key,result:figures.peek(kind,source)}))
-  const result=state.key===key?state.result:figures.peek(kind,source),error=state.key===key?state.error:''
+  const [state,setState]=useState<{key:string;result?:FigureResult;error?:string}>(()=>({key,result:chemistryRenderQueue.peek(kind,source)}))
+  const result=state.key===key?state.result:chemistryRenderQueue.peek(kind,source),error=state.key===key?state.error:''
   const active=near||Boolean(result)
   useEffect(()=>{
     if(!ready||!active||result)return
     let disposed=false
-    setState({key,result:figures.peek(kind,source)})
-    figures.render(kind,source).then(result=>{if(!disposed)setState({key,result})}).catch(err=>{if(!disposed)setState({key,error:err.message})})
+    setState({key,result:chemistryRenderQueue.peek(kind,source)})
+    chemistryRenderQueue.render(kind,source).then(result=>{if(!disposed)setState({key,result})}).catch(err=>{if(!disposed)setState({key,error:err.message})})
     return()=>{disposed=true}
   },[kind,source,key,ready,active,result])
   const blocked=result?.status==='blocked_for_publication'||result?.status==='error'||result?.status==='blocked'
   const Status=inline?'span':'div'
-  const drawingKind=kind==='equation'?'reaction':kind
-  const content=!ready?<Status className="figure-loading">等待结构输入完成…</Status>:!active?<Status className="figure-loading"/>:error?<Status role="alert" className="figure-error">{error}</Status>:!result?<Status className="figure-loading"><span className="spinner"/>正在绘制…</Status>:blocked?<Status className="figure-error" role="alert">当前结构或电子流尚未通过校验。{result.warnings?.length?<span>{result.warnings.join('；')}</span>:null}</Status>:result.svg?<ChemistrySvg svg={result.svg} source={source} kind={drawingKind as 'molecule'|'reaction'|'mechanism'} inline={inline}/>:<Status className="figure-error">绘图没有返回可显示的结构。</Status>
+  const drawingKind=kind==='equation'||kind==='formula'?'reaction':kind
+  const warnJoiner=locale==='zh-CN'?'；':'; '
+  const content=!ready?<Status className="figure-loading">{t('md.waitingStructure')}</Status>:!active?<Status className="figure-loading"/>:error?<Status role="alert" className="figure-error">{error}</Status>:!result?<Status className="figure-loading"><span className="spinner"/>{t('md.drawing')}</Status>:blocked?<Status className="figure-error" role="alert">{t('md.structureBlocked')}{result.warnings?.length?<span>{result.warnings.join(warnJoiner)}</span>:null}</Status>:result.svg?<ChemistrySvg svg={result.svg} source={source} kind={drawingKind as 'molecule'|'reaction'|'mechanism'} inline={inline}/>:<Status className="figure-error">{t('md.noStructureReturned')}</Status>
   if(inline)return <span ref={ref} className="chem-formula-inline">{content}</span>
   return <figure ref={ref} className="chem-figure" data-kind={kind}>{content}</figure>
 }
@@ -82,13 +77,15 @@ function remarkStructureMath() {
   }
 }
 function ChemistryMath(props:any) {
+  const {t}=useI18n()
   const allowExecution=useContext(ExecutionAllowedContext)
-  if(!allowExecution) return <span className="study-footnote">组件内容未完成</span>
+  if(!allowExecution) return <span className="study-footnote">{t('md.componentIncomplete')}</span>
   const kind=props['data-kind']==='equation'?'equation':props['data-kind']==='reaction'?'reaction':'molecule'
   return <ChemistryFigure kind={kind} source={String(props['data-source']||'')} inline={props['data-inline']==='true'} ready={props['data-source-ready']==='true'}/>
 }
 
 function Code({className,children,node: _node,...props}:any) {
+  const {t}=useI18n()
   const streaming=useContext(StreamContext)
   const allowStudy=useContext(StudyAllowedContext)
   const allowExecution=useContext(ExecutionAllowedContext)
@@ -96,22 +93,41 @@ function Code({className,children,node: _node,...props}:any) {
   const source=String(children).replace(/\n$/,'')
   const kind = language==='smiles'||language==='molecule'?'molecule':language
   const ready=props['data-source-ready']==='true'
-  if(!allowExecution&&(language==='study'||language==='ui'||kind&&['molecule','reaction','mechanism','equation'].includes(kind)))return <div className="study-footnote">组件内容未完成</div>
+  if(!allowExecution&&(language==='study'||language==='ui'||kind&&['molecule','reaction','mechanism','equation','formula'].includes(kind)))return <div className="study-footnote">{t('md.componentIncomplete')}</div>
   if(allowStudy && (language==='study'||language==='ui')) return <LiveStudyBlock source={source} streaming={streaming||!ready} blockId={'block-'+String(_node?.position?.start?.offset??0)}/>
-  if(kind && ['molecule','reaction','mechanism','equation'].includes(kind)) return <ChemistryFigure kind={kind} source={source} ready={ready}/>
+  if(kind && ['molecule','reaction','mechanism','equation','formula'].includes(kind)) return <ChemistryFigure kind={kind} source={source} ready={ready}/>
   return <code className={className} {...props}>{children}</code>
 }
 function Link({children,href}:any) {
+  const {t}=useI18n()
   const openSource=useContext(SourceContext)
   const source=typeof href==='string'?parseStudySource(href):null
-  if(source) return <button type="button" onClick={()=>openSource?.(source.id,source.page)} disabled={!openSource} title={source.page?`打开课程资料，第 ${source.page} 页`:'打开课程资料'} style={{display:'inline',verticalAlign:'baseline',border:0,borderRadius:5,padding:'1px 5px',margin:'0 2px',background:'#eaf4ef',color:'#38745c',fontSize:'0.82em',lineHeight:1.5}}>{children}</button>
+  if(source) return <button type="button" onClick={()=>openSource?.(source.id,source.page)} disabled={!openSource} title={source.page?t('md.openSourcePage',{page:source.page}):t('md.openSource')} style={{display:'inline',verticalAlign:'baseline',border:0,borderRadius:5,padding:'1px 5px',margin:'0 2px',background:'#eaf4ef',color:'#38745c',fontSize:'0.82em',lineHeight:1.5}}>{children}</button>
   return href ? <a href={href} target="_blank" rel="noreferrer">{children}</a> : <span>{children}</span>
 }
 const components={'chem-formula':ChemistryMath,code:Code,pre:({children}:any)=><div className="code-container">{children}</div>,a:Link}
-function normalizeMath(source:string) {
-  return source.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g).map(part=>/^(?:```|~~~)/.test(part)?part:part
+function normalizeMathSegment(text:string) {
+  return text
     .replace(/\\\[([\s\S]*?)\\\]/g,(_,inner)=>'$$'+inner+'$$')
-    .replace(/\\\((.*?)\\\)/g,(_,inner)=>'$ '+inner+' $')).join('')
+    .replace(/\\\((.*?)\\\)/g,(_,inner)=>'$ '+inner+' $')
+}
+export function normalizeMath(source:string) {
+  const lines=source.split('\n'),out:string[]=[]
+  let plain:string[]=[],fenceChar='',fenceLen=0
+  const flush=()=>{if(!plain.length)return;out.push(normalizeMathSegment(plain.join('\n')));plain=[]}
+  for(const line of lines){
+    if(!fenceChar){
+      const open=/^[ ]{0,3}(`{3,}|~{3,})([^\n]*)$/.exec(line)
+      if(open&&!(open[1][0]==='`'&&open[2].includes('`'))){flush();fenceChar=open[1][0];fenceLen=open[1].length;out.push(line)}
+      else plain.push(line)
+    }else{
+      out.push(line)
+      const close=/^[ ]{0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line)
+      if(close&&close[1][0]===fenceChar&&close[1].length>=fenceLen){fenceChar='';fenceLen=0}
+    }
+  }
+  flush()
+  return out.join('\n')
 }
 export const Markdown=memo(function Markdown({text,streaming=false,incomplete=false,allowStudy=true,onOpenSource}:{text:string;streaming?:boolean;incomplete?:boolean;allowStudy?:boolean;onOpenSource?:(id:string,page?:number)=>void}) {
   const inheritedSource=useContext(SourceContext)

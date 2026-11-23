@@ -1,9 +1,10 @@
 import {useState} from 'react'
-import {AlertCircle,Check,Copy,HardDrive,RefreshCw,RotateCcw,Sparkles,X} from 'lucide-react'
+import {AlertCircle,Check,Copy,Globe,HardDrive,RefreshCw,RotateCcw,Sparkles,X} from 'lucide-react'
 import {
  DEFAULT_PRESET_CONFIGS,THINKING_PRESETS,effortLabel,thinkingPreset,
  type ThinkingPreset,type ThinkingPresetConfigs,type ThinkingPresetOverride
 } from '../shared/model-presets.mjs'
+import {LOCALE_META,SUPPORTED_LOCALES,useI18n,type Locale} from './i18n'
 import {formatBytes,type CatalogModel,type ManagedCourse,type SettingsInfo} from './settings-types'
 
 type Props={
@@ -23,10 +24,10 @@ type Props={
  conversationBusy:boolean
 }
 
-const PRESET_META:Record<ThinkingPreset,{title:string;subtitle:string;desc:string}>={
- fast:{title:'Fast',subtitle:'快速响应',desc:'适合概念查询、日常问答与快速核对细节。'},
- default:{title:'Default',subtitle:'均衡深入',desc:'日常课程辅导与习题讲解的默认档位。'},
- deep:{title:'Deep',subtitle:'深度推理',desc:'适合复杂推导、机理分析与综合专题复习。'}
+const PRESET_TITLES:Record<ThinkingPreset,string>={
+ fast:'Fast',
+ default:'Default',
+ deep:'Deep'
 }
 
 function modelOptionLabel(model:CatalogModel){
@@ -47,10 +48,12 @@ export function SettingsGeneral({
  preset,onPresetChange,presetConfigs,onSavePresetConfigs,onResetPresetConfigs,
  catalogModels,onRefreshModels,status,leftOpen,onToggleLeftOpen,onResetLayout,courses,info,conversationBusy
 }:Props){
+ const {locale,setLocale,t}=useI18n()
  const [copiedPath,setCopiedPath]=useState(false)
  const [layoutResetDone,setLayoutResetDone]=useState(false)
  const [savingPreset,setSavingPreset]=useState(false)
  const [savedNotice,setSavedNotice]=useState('')
+ const [savedLocale,setSavedLocale]=useState<Locale|null>(null)
  const [presetError,setPresetError]=useState('')
  const [refreshingModels,setRefreshingModels]=useState(false)
 
@@ -73,6 +76,13 @@ export function SettingsGeneral({
   setTimeout(()=>setSavedNotice(prev=>prev===message?'':prev),2000)
  }
 
+ function handleLocaleChange(next:Locale){
+  if(next===locale)return
+  setLocale(next)
+  setSavedLocale(next)
+  setTimeout(()=>setSavedLocale(prev=>prev===next?null:prev),2200)
+ }
+
  async function updateSlot(id:ThinkingPreset,nextModel:string,nextEffort:string|null){
   setSavingPreset(true);setPresetError('')
   try{
@@ -82,9 +92,9 @@ export function SettingsGeneral({
     payload[key]=key===id?{model:nextModel,effort:nextEffort}:{model:current.model,effort:current.effort}
    }
    await onSavePresetConfigs(payload)
-   flashSaved(`已更新 ${PRESET_META[id].title} 配置`)
+   flashSaved(t('sg.presetUpdated',{preset:PRESET_TITLES[id]}))
   }catch(err:any){
-   setPresetError(err.message||'模型配置未能保存，请重试。')
+   setPresetError(err.message||t('sg.presetSaveFailed'))
   }finally{
    setSavingPreset(false)
   }
@@ -109,9 +119,9 @@ export function SettingsGeneral({
   setSavingPreset(true);setPresetError('')
   try{
    await onResetPresetConfigs()
-   flashSaved('已恢复默认模型配置')
+   flashSaved(t('sg.presetResetDone'))
   }catch(err:any){
-   setPresetError(err.message||'恢复默认失败，请重试。')
+   setPresetError(err.message||t('sg.presetResetFailed'))
   }finally{
    setSavingPreset(false)
   }
@@ -121,9 +131,9 @@ export function SettingsGeneral({
   setRefreshingModels(true);setPresetError('')
   try{
    await onRefreshModels()
-   flashSaved('已同步 Codex 模型列表')
+   flashSaved(t('sg.modelsSynced'))
   }catch(err:any){
-   setPresetError(err.message||'刷新模型目录失败。')
+   setPresetError(err.message||t('sg.modelsSyncFailed'))
   }finally{
    setRefreshingModels(false)
   }
@@ -145,29 +155,65 @@ export function SettingsGeneral({
  }
 
  return <div className="sg-root">
+  <section className="sg-section" aria-labelledby="sg-lang-title">
+   <div className="sg-section-head-row">
+    <div className="sg-section-head">
+     <h3 id="sg-lang-title">{t('sg.langTitle')}</h3>
+     <p>{t('sg.langDesc')}</p>
+    </div>
+    {savedLocale&&<span className="sg-saved-pill" role="status"><Check size={12}/>{t('sg.langSaved',{lang:LOCALE_META[savedLocale].nativeLabel})}</span>}
+   </div>
+   <div className="sg-card-list">
+    <div className="sg-row">
+     <div className="sg-row-info">
+      <strong>{t('sg.langLabel')}</strong>
+      <span>{t('sg.langHint')}</span>
+     </div>
+     <div className="sg-lang-pills" role="radiogroup" aria-label={t('sg.langLabel')}>
+      {SUPPORTED_LOCALES.map(code=>{
+       const active=locale===code
+       return <button
+        key={code}
+        type="button"
+        role="radio"
+        aria-checked={active}
+        className={'sg-lang-btn'+(active?' is-active':'')}
+        onClick={()=>handleLocaleChange(code)}
+       >
+        <Globe size={13}/>
+        <span>{LOCALE_META[code].nativeLabel}</span>
+       </button>
+      })}
+     </div>
+    </div>
+   </div>
+  </section>
+
   <section className="sg-section" aria-labelledby="sg-preset-title">
    <div className="sg-section-head-row">
     <div className="sg-section-head">
-     <h3 id="sg-preset-title">思考强度与模型配置</h3>
-     <p>选择当前档位，并为 Fast、Default、Deep 分别配置 Codex 提供的模型与思考强度。</p>
+     <h3 id="sg-preset-title">{t('sg.presetTitle')}</h3>
+     <p>{t('sg.presetDesc')}</p>
     </div>
     <div className="sg-section-actions">
      {savedNotice&&<span className="sg-saved-pill" role="status"><Check size={12}/>{savedNotice}</span>}
      <button type="button" className="settings-btn-secondary-xs" disabled={refreshingModels||savingPreset} onClick={()=>void handleRefreshModels()}>
-      <RefreshCw size={12} className={refreshingModels?'sg-spin':''}/>刷新模型
+      <RefreshCw size={12} className={refreshingModels?'sg-spin':''}/>{t('sg.refreshModels')}
      </button>
      {isCustomized&&<button type="button" className="settings-btn-ghost-xs" disabled={savingPreset||conversationBusy} onClick={()=>void handleResetPresets()}>
-      <RotateCcw size={12}/>恢复默认
+      <RotateCcw size={12}/>{t('sg.resetDefault')}
      </button>}
     </div>
    </div>
 
-   {presetError&&<div className="settings-alert is-error" role="alert"><AlertCircle size={14}/><span>{presetError}</span><button type="button" aria-label="关闭错误" onClick={()=>setPresetError('')}><X size={13}/></button></div>}
+   {presetError&&<div className="settings-alert is-error" role="alert"><AlertCircle size={14}/><span>{presetError}</span><button type="button" aria-label={t('app.closeError')} onClick={()=>setPresetError('')}><X size={13}/></button></div>}
 
-   <div className="sg-preset-list" role="radiogroup" aria-label="思考强度档位配置">
+   <div className="sg-preset-list" role="radiogroup" aria-label={t('sg.presetGroupAria')}>
     {THINKING_PRESETS.map(id=>{
      const slot=thinkingPreset(id,presetConfigs)
-     const meta=PRESET_META[id]
+     const title=PRESET_TITLES[id]
+     const subtitle=id==='fast'?t('effort.preset.fast.subtitle'):id==='deep'?t('effort.preset.deep.subtitle'):t('effort.preset.default.subtitle')
+     const desc=id==='fast'?t('effort.preset.fast.desc'):id==='deep'?t('effort.preset.deep.desc'):t('effort.preset.default.desc')
      const selected=preset===id
      const matchedModel=catalogModels.find(m=>m.model===slot.model||m.id===slot.model)
      const available=isSlotAvailable(catalogModels,slot.model,slot.effort)
@@ -187,42 +233,42 @@ export function SettingsGeneral({
        <span className={'sg-radio-ring'+(selected?' is-checked':'')} aria-hidden="true"><i/></span>
        <div className="sg-preset-meta">
         <div className="sg-preset-heading">
-         <span className="sg-preset-name">{meta.title}</span>
-         <span className="sg-preset-sub">{meta.subtitle}</span>
-         {selected&&<span className="sg-active-tag">当前</span>}
-         {!available&&<span className="sg-warn-tag">不可用</span>}
+         <span className="sg-preset-name">{title}</span>
+         <span className="sg-preset-sub">{subtitle}</span>
+         {selected&&<span className="sg-active-tag">{t('app.currentTag')}</span>}
+         {!available&&<span className="sg-warn-tag">{t('app.unavailableTag')}</span>}
         </div>
-        <p className="sg-preset-desc">{meta.desc}</p>
+        <p className="sg-preset-desc">{desc}</p>
        </div>
       </button>
 
       <div className="sg-preset-controls">
        <label className="sg-field">
-        <span>模型</span>
+        <span>{t('sg.modelLabel')}</span>
         <select
-         aria-label={`${meta.title} 档位模型`}
+         aria-label={t('sg.modelAria',{preset:title})}
          value={slot.model}
          disabled={!canEdit}
          onChange={event=>handleModelChange(id,event.target.value)}
         >
-         {!matchedModel&&<option value={slot.model}>{slot.model}{catalogModels.length?'（当前账号不可用）':''}</option>}
+         {!matchedModel&&<option value={slot.model}>{slot.model}{catalogModels.length?t('sg.modelUnavailableSuffix'):''}</option>}
          {catalogModels.map(m=><option key={m.model} value={m.model}>{modelOptionLabel(m)}</option>)}
         </select>
        </label>
 
        <label className="sg-field is-effort">
-        <span>思考强度</span>
+        <span>{t('sg.effortLabel')}</span>
         <select
-         aria-label={`${meta.title} 档位思考强度`}
+         aria-label={t('sg.effortAria',{preset:title})}
          value={slot.effort??''}
          disabled={!canEdit||!matchedModel||effortOptions.length===0}
          onChange={event=>void updateSlot(id,slot.model,event.target.value||null)}
         >
-         {!matchedModel?<option value={slot.effort??''}>{effortLabel(slot.effort)}</option>
-          :effortOptions.length===0?<option value="">默认（无分级）</option>
+         {!matchedModel?<option value={slot.effort??''}>{effortLabel(slot.effort,locale)}</option>
+          :effortOptions.length===0?<option value="">{t('sg.effortNone')}</option>
           :<>
-           {effortMissing&&<option value={slot.effort??''}>{effortLabel(slot.effort)}（不支持）</option>}
-           {effortOptions.map(opt=><option key={opt.reasoningEffort} value={opt.reasoningEffort}>{effortLabel(opt.reasoningEffort)}</option>)}
+           {effortMissing&&<option value={slot.effort??''}>{effortLabel(slot.effort,locale)}{t('sg.effortUnsupportedSuffix')}</option>}
+           {effortOptions.map(opt=><option key={opt.reasoningEffort} value={opt.reasoningEffort}>{effortLabel(opt.reasoningEffort,locale)}</option>)}
           </>}
         </select>
        </label>
@@ -230,25 +276,25 @@ export function SettingsGeneral({
      </div>
     })}
    </div>
-   {!catalogModels.length&&<p className="sg-catalog-hint">正在等待 Codex 返回可用模型列表；连接就绪后即可自由调整每个档位的模型与思考强度。</p>}
+   {!catalogModels.length&&<p className="sg-catalog-hint">{t('sg.waitingCatalog')}</p>}
   </section>
 
   <section className="sg-section" aria-labelledby="sg-layout-title">
    <div className="sg-section-head">
-    <h3 id="sg-layout-title">工作区界面</h3>
-    <p>调整侧边栏显示与分栏默认尺寸。</p>
+    <h3 id="sg-layout-title">{t('sg.layoutTitle')}</h3>
+    <p>{t('sg.layoutDesc')}</p>
    </div>
    <div className="sg-card-list">
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>显示左侧课程资料栏</strong>
-      <span>展开后可随时浏览课件、资料、日程与练习记录。</span>
+      <strong>{t('sg.showLeftSidebar')}</strong>
+      <span>{t('sg.showLeftSidebarDesc')}</span>
      </div>
      <button
       type="button"
       role="switch"
       aria-checked={leftOpen}
-      aria-label="显示左侧课程资料栏"
+      aria-label={t('sg.showLeftSidebar')}
       className={'sg-switch'+(leftOpen?' is-on':'')}
       onClick={onToggleLeftOpen}
      >
@@ -258,11 +304,11 @@ export function SettingsGeneral({
 
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>分栏宽度</strong>
-      <span>恢复左侧资料栏（280px）与右侧 PDF 阅读器（600px）的默认比例。</span>
+      <strong>{t('sg.paneWidths')}</strong>
+      <span>{t('sg.paneWidthsDesc')}</span>
      </div>
      <button type="button" className="settings-btn-secondary-xs" onClick={handleResetLayout}>
-      {layoutResetDone?<><Check size={12}/>已恢复默认</>:<><RotateCcw size={12}/>重置宽度</>}
+      {layoutResetDone?<><Check size={12}/>{t('sg.resetDone')}</>:<><RotateCcw size={12}/>{t('sg.resetWidths')}</>}
      </button>
     </div>
    </div>
@@ -270,44 +316,44 @@ export function SettingsGeneral({
 
   <section className="sg-section" aria-labelledby="sg-storage-title">
    <div className="sg-section-head">
-    <h3 id="sg-storage-title">本地服务与存储</h3>
-    <p>所有课程文件、PDF 批注与学习记录均保存在你的本机磁盘中。</p>
+    <h3 id="sg-storage-title">{t('sg.storageTitle')}</h3>
+    <p>{t('sg.storageDesc')}</p>
    </div>
    <div className="sg-card-list">
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>Codex 连接状态</strong>
-      <span>{status?.authenticated?`已通过本机 Codex 登录，已发现 ${catalogModels.length} 个可用模型`:status?.connected?'已连接到 Codex，等待登录授权':'正在连接本机 Codex 服务…'}</span>
+      <strong>{t('sg.codexStatus')}</strong>
+      <span>{status?.authenticated?t('sg.codexAuthDesc',{count:catalogModels.length}):status?.connected?t('sg.codexWaitAuthDesc'):t('sg.codexConnectingDesc')}</span>
      </div>
      <span className={'sg-status-pill '+(status?.authenticated?'is-online':'is-offline')}>
-      <i aria-hidden="true"/>{status?.authenticated?'已连接':'未就绪'}
+      <i aria-hidden="true"/>{status?.authenticated?t('sg.statusOnline'):t('sg.statusOffline')}
      </span>
     </div>
 
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>课程文件根目录</strong>
+      <strong>{t('sg.workspaceRoot')}</strong>
       <span className="sg-mono">{info?.workspaceRoot||'~/Documents/StudyStudio'}</span>
      </div>
      {info?.workspaceRoot&&<button type="button" className="settings-btn-secondary-xs" onClick={()=>void copyWorkspacePath()}>
-      {copiedPath?<><Check size={12}/>已复制</>:<><Copy size={12}/>复制路径</>}
+      {copiedPath?<><Check size={12}/>{t('app.copied')}</>:<><Copy size={12}/>{t('sg.copyPath')}</>}
      </button>}
     </div>
 
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>已上传资料总览</strong>
-      <span className="sm-tabular">共 {totalStats.courseware} 份课件、{totalStats.materials} 份资料，合计占用 {formatBytes(totalStats.bytes)}（单文件上限 {info?.maxMaterialLabel||'100 MB'}）</span>
+      <strong>{t('sg.materialsOverview')}</strong>
+      <span className="sm-tabular">{t('sg.materialsOverviewText',{courseware:totalStats.courseware,materials:totalStats.materials,bytes:formatBytes(totalStats.bytes),limit:info?.maxMaterialLabel||'100 MB'})}</span>
      </div>
      <HardDrive size={16} className="sg-row-icon"/>
     </div>
 
     <div className="sg-row">
      <div className="sg-row-info">
-      <strong>应用版本</strong>
-      <span>Study Studio · 本地优先 AI 学习工作区</span>
+      <strong>{t('sg.appVersion')}</strong>
+      <span>{t('app.tagline')}</span>
      </div>
-     <span className="sg-version-chip"><Sparkles size={11}/>v{info?.version||'0.20.22'}</span>
+     <span className="sg-version-chip"><Sparkles size={11}/>v{info?.version||'0.21.0'}</span>
     </div>
    </div>
   </section>

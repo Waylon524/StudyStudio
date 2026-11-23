@@ -1,13 +1,9 @@
 import json
 import sys
 from copy import deepcopy
-from xml.etree import ElementTree as ET
 
-from rdkit import Chem
-from rdkit.Chem import rdDepictor
-from rdkit.Chem.Draw import rdMolDraw2D
-
-from codex_organic_chem.service import chem_draw, chem_mechanism_render, chem_mechanism_validate, chem_route_figure
+from codex_organic_chem.service import chem_mechanism_render, chem_mechanism_validate, chem_route_figure
+from chem_annotations import render_standalone_molecule_svg
 from chem_style import install, mechanism_style
 from chem_reagents import reagent_parts
 
@@ -18,38 +14,16 @@ def main():
     data = json.load(sys.stdin)
     kind, source = data['kind'], data['source']
     if kind == 'molecule':
-        if not isinstance(source, str) or not source.strip() or '>' in source:
-            raise ValueError('Molecule requires one SMILES string.')
-        result = chem_draw(smiles=source, output='svg')
-        svg = None
-        if result.get('status') == 'ok' and result.get('data'):
-            # Native vector formula: bonds stay paths, atom symbols stay text.
-            # Keep validation/warnings from the shared engine and its RDKit runtime.
-            mol = Chem.MolFromSmiles(source)
-            if mol is None:
-                raise ValueError('Invalid molecule structure.')
-            rdDepictor.Compute2DCoords(mol)
-            drawer = rdMolDraw2D.MolDraw2DSVG(-1, -1, -1, -1, True)
-            options = drawer.drawOptions()
-            options.fixedBondLength = 24
-            options.fixedFontSize = 13
-            options.fontFile = '/System/Library/Fonts/Supplemental/Times New Roman.ttf'
-            options.bondLineWidth = 0.8
-            options.clearBackground = False
-            options.padding = 0.08
-            options.useBWAtomPalette()
-            rdMolDraw2D.PrepareAndDrawMolecule(drawer, mol)
-            drawer.FinishDrawing()
-            root = ET.fromstring(drawer.GetDrawingText().replace('sans-serif', 'Times New Roman'))
-            # Browser fonts can extend slightly beyond RDKit's text bounds,
-            # particularly superscript charges; include safe glyph breathing room.
-            x, y, width, height = map(float, root.attrib['viewBox'].split())
-            root.set('viewBox', f'{x - 3:g} {y - 3:g} {width + 6:g} {height + 6:g}')
-            root.set('width', f'{width + 6:g}px')
-            root.set('height', f'{height + 6:g}px')
-            ET.register_namespace('', 'http://www.w3.org/2000/svg')
-            svg = ET.tostring(root, encoding='unicode')
-        return {'status': result['status'], 'svg': svg, 'warnings': result.get('warnings', [])}
+        if isinstance(source, str):
+            if not source.strip() or '>' in source:
+                raise ValueError('Molecule requires one SMILES string.')
+        elif isinstance(source, dict):
+            if not isinstance(source.get('smiles'), str) or not source['smiles'].strip() or '>' in source['smiles']:
+                raise ValueError('Molecule specification requires a valid SMILES string.')
+        else:
+            raise ValueError('Molecule requires a SMILES string or a molecule specification object.')
+        svg, warnings = render_standalone_molecule_svg(source)
+        return {'status': 'ok', 'svg': svg, 'warnings': warnings}
     if kind == 'reaction':
         if isinstance(source, str):
             if source.count('>') != 2:

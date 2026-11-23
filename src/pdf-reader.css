@@ -35,7 +35,29 @@
 .pdf-reader-thumbnail:hover{background:#eeece6}.pdf-reader-thumbnail[aria-current="page"]{background:#f0e6dd;border-color:#c18c71;color:#7e4631}
 .pdf-reader-thumbnail-preview{position:relative;display:block;width:100%;max-width:116px;aspect-ratio:3/4;flex-shrink:0;background:#fff;box-shadow:0 1px 4px #28231c17}
 .pdf-reader-thumbnail-preview>span{position:absolute;inset:0;display:block}.pdf-reader-thumbnail canvas{display:block;width:100%;height:100%;max-width:none}
-.pdf-reader-outline{height:100%;overflow:auto;padding:10px 5px;box-sizing:border-box;overscroll-behavior:contain}
+.pdf-reader-outline-shell{display:flex;flex-direction:column;height:100%;min-height:0}
+.pdf-reader-outline-top{display:flex;flex-direction:column;gap:6px;padding:8px 6px;border-bottom:1px solid #e7e3db;background:#faf9f6;flex-shrink:0}
+.pdf-reader-outline-regenerate-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;width:100%;height:28px;padding:0 6px;border:1px solid #ded9d1;border-radius:6px;background:#fff;color:#4a433b;font:inherit;font-size:11.5px;font-weight:500;cursor:pointer}
+.pdf-reader-outline-regenerate-btn:hover:not(:disabled){background:#f2ece4;border-color:#d2c8bc}
+.pdf-reader-outline-regenerate-btn:disabled{opacity:.7;cursor:default}
+.pdf-reader-outline-spinner{animation:pdf-reader-outline-spin .8s linear infinite}
+@keyframes pdf-reader-outline-spin{to{transform:rotate(360deg)}}
+.pdf-reader-outline-error{display:flex;align-items:flex-start;justify-content:space-between;gap:4px;padding:5px 6px;border:1px solid #ecd5cc;border-radius:5px;background:#fff7f4;color:#9a4f3b;font-size:11px;line-height:1.35}
+.pdf-reader-outline-error>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.pdf-reader-outline-error>button{display:grid;place-items:center;flex:none;width:16px;height:16px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;cursor:pointer}
+.pdf-reader-outline{flex:1;min-height:0;overflow:auto;padding:8px 5px;box-sizing:border-box;overscroll-behavior:contain}
+.pdf-reader-outline-empty{margin:12px 6px;font-size:12px;color:#8c857b;text-align:center}
+.pdf-outline-confirm-backdrop{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:16px;background:rgba(28,25,22,.34);backdrop-filter:blur(2px)}
+.pdf-outline-confirm-dialog{width:min(380px,100%);padding:18px 20px;border:1px solid #e4e0d8;border-radius:12px;background:#fff;box-shadow:0 16px 40px rgba(28,24,18,.18);color:#282725}
+.pdf-outline-confirm-dialog h2{margin:0 0 8px;font-size:15px;font-weight:600;color:#24221f}
+.pdf-outline-confirm-dialog p{margin:0;font-size:13px;line-height:1.6;color:#625c54}
+.pdf-outline-confirm-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px}
+.pdf-outline-confirm-cancel,.pdf-outline-confirm-primary{height:32px;padding:0 13px;border-radius:8px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer}
+.pdf-outline-confirm-cancel{border:1px solid #dedad3;background:#fff;color:#544f48}
+.pdf-outline-confirm-cancel:hover{background:#f5f3ef;color:#282725}
+.pdf-outline-confirm-primary{border:1px solid #c8795c;background:#c8795c;color:#fff}
+.pdf-outline-confirm-primary:hover:not(:disabled){background:#b6684c;border-color:#b6684c}
+.pdf-outline-confirm-primary:disabled{opacity:.6;cursor:default}
 .pdf-reader-outline-children{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .22s cubic-bezier(.22,.75,.25,1),opacity .16s ease}
 .pdf-reader-outline-children.is-open{grid-template-rows:1fr;opacity:1}
 .pdf-reader-outline-children>div{min-height:0;overflow:hidden}

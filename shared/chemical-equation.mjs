@@ -9,7 +9,12 @@ const ARROWS = ['<-->', '<<=>', '<=>>', '<=>', '<->', '->', '<-', '⇌', '→', 
 const KIND = new Map([['->', 'forward'], ['→', 'forward'], ['<-', 'reverse'], ['←', 'reverse'], ['<=>', 'equilibrium'], ['⇌', 'equilibrium']]);
 const RESONANCE = new Set(['<->', '↔']);
 const SUB = Object.fromEntries([... '0123456789+-()'].map((c, i) => [c, [... '₀₁₂₃₄₅₆₇₈₉₊₋₍₎'][i]]));
-const SUP = Object.fromEntries([... '0123456789+-()'].map((c, i) => [c, [... '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾'][i]]));
+const SUP = {
+  ...Object.fromEntries([... '0123456789+-()'].map((c, i) => [c, [... '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁽⁾'][i]])),
+  '•': '•',
+  '·': '•',
+  '.': '•',
+};
 
 export class ChemicalEquationError extends Error {
   constructor(code, message, offset) {
@@ -88,13 +93,13 @@ export function chemicalEquationFromMath(mathSource) {
 
 function scriptText(value, table, kind) {
   if (!value || [...value].some(c => !Object.hasOwn(table, c)))
-    fail('UNSUPPORTED_SCRIPT', `${kind}仅支持数字、电荷正负号与括号；请明确展开复杂表达式。`);
+    fail('UNSUPPORTED_SCRIPT', `${kind}仅支持数字、电荷正负号、自由基点与括号；请明确展开复杂表达式。`);
   return [...value].map(c => table[c]).join('');
 }
 function scriptAt(text, start) {
   if (text[start] === '{') return groupAt(text, start);
-  const value = /^[0-9]*[+-]?/.exec(text.slice(start))?.[0];
-  if (!value) fail('UNSUPPORTED_SCRIPT', '上下标需用数字或电荷；多字符请放在花括号中。', start);
+  const value = /^(?:[0-9]*[+−\-•·.]+|[0-9]+)/u.exec(text.slice(start))?.[0];
+  if (!value) fail('UNSUPPORTED_SCRIPT', '上下标需用数字、电荷或自由基点；多字符请放在花括号中。', start);
   return {value, end: start + value.length};
 }
 
@@ -110,7 +115,11 @@ function expandPlainCommands(text) {
       if (text[i] !== '{') fail('UNSUPPORTED_COMMAND', `\\${name} 需要花括号。`, i);
       const group = groupAt(text, i); out += expandPlainCommands(group.value); i = group.end;
     } else {
-      const replacements = {Delta: 'Δ', delta: 'δ', circ: '°', cdot: '·', times: '×', uparrow: '↑', downarrow: '↓', ',': ' ', ';': ' ', '!': '', ' ': ' '};
+      const replacements = {
+        Delta: 'Δ', delta: 'δ', alpha: 'α', beta: 'β', gamma: 'γ', lambda: 'λ', mu: 'μ', nu: 'ν', pi: 'π', sigma: 'σ',
+        circ: '°', degree: '°', cdot: '·', bullet: '•', times: '×', pm: '±', mp: '∓', approx: '≈',
+        uparrow: '↑', downarrow: '↓', ',': ' ', ';': ' ', '!': '', ' ': ' ',
+      };
       if (!Object.hasOwn(replacements, name)) fail('UNSUPPORTED_COMMAND', `暂不支持 \\${name}；请改用明确的化学式或条件文字。`, i - command[0].length);
       out += replacements[name];
     }
@@ -144,12 +153,18 @@ export function formatChemicalSpecies(raw) {
       i += digits.length; continue;
     }
     if (c === '+' || c === '-' || c === '−') {
-      // A species charge is terminal, possibly before a phase or gas/solid mark.
-      if (!/^(?:[+−-]+)(?:\s*\((?:aq|s|l|g)\))?\s*[↑↓]?$/u.test(text.slice(i)))
+      // An inline hyphen between two chemical groups (e.g. C4H9-Br, R-H) is a single bond.
+      const prev = text[i - 1] || '';
+      const next = text[i + 1] || '';
+      if ((c === '-' || c === '−') && /[A-Za-z0-9)\]₀-₉]/u.test(prev) && /[A-Za-z(\[]/u.test(next)) {
+        out += '–'; i++; continue;
+      }
+      // A species charge is terminal, possibly with a radical dot and/or phase/gas/solid mark.
+      if (!/^(?:[+−\-•]+)(?:\s*\((?:aq|s|l|g)\))?\s*[↑↓]?$/u.test(text.slice(i)))
         fail('AMBIGUOUS_CHARGE', '物种间的 + 两侧请留空格；电荷请写 H+、Fe^{3+} 等明确形式。', i);
       out += c === '+' ? '⁺' : '⁻'; i++; continue;
     }
-    if (!/[A-Za-z\p{N}\s()[\]·.,↑↓°⁰-⁹₀-₉⁺⁻₊₋]/u.test(c))
+    if (!/[A-Za-z\p{N}\s()[\]·•–—.,↑↓°±Δδαβγλμνπσ⁰-⁹₀-₉⁺⁻₊₋⁽⁾₍₎]/u.test(c))
       fail('UNSUPPORTED_SPECIES', `物种中暂不支持字符 ${c}。`, i);
     out += c; i++;
   }
@@ -161,9 +176,9 @@ export function formatChemicalCondition(raw) {
   let text = expandPlainCommands(String(raw).trim());
   // Common mhchem temperature notation, before generic superscript conversion.
   text = text.replace(/\^\{?°\}?/gu, '°').replace(/\^\{?\\?circ\}?/gu, '°');
-  text = text.replace(/\^\{([0-9+\-()]+)\}|\^([0-9]*[+\-])/gu, (_, a, b) => scriptText(a || b, SUP, '上标'));
+  text = text.replace(/\^\{([0-9+−\-()•·.]+)\}|\^([0-9]*[+−\-•·.]+)/gu, (_, a, b) => scriptText((a || b).replace(/−/g, '-'), SUP, '上标'));
   if (/[\\{}^_$%&#~|]/u.test(text)) fail('UNSUPPORTED_CONDITION', '箭头条件含未支持的排版；请使用中文、化学式与普通数字。');
-  return text.replace(/(?:[A-Z][a-z]?)(?:[A-Z][a-z]?|\d+|\([^()]*\)\d*)*(?:[+\-])?/gu, value => formatChemicalSpecies(value)).replace(/\s+/gu, ' ');
+  return text.replace(/(?:[A-Z][a-z]?)(?:[A-Z][a-z]?|\d+|\([^()]*\)\d*)*(?:[+\-•])?/gu, value => formatChemicalSpecies(value)).replace(/\s+/gu, ' ');
 }
 
 function speciesItems(side) {
@@ -214,4 +229,17 @@ export function parseChemicalEquation(input) {
   }
   items.push(...speciesItems(source.slice(start)));
   return {rows: [{items}]};
+}
+
+/**
+ * Parse a standalone formula or species expression (without reaction arrows) into
+ * the same route-text structure, for canvases and vector formula cards.
+ */
+export function parseChemicalFormula(input) {
+  if (typeof input !== 'string' || !input.trim()) fail('EMPTY_EQUATION', '请输入化学式。');
+  const source = /^\s*\\ce\b/u.test(input) ? extractCeExpression(input) : input.trim();
+  if (source === null) fail('MIXED_MATH', '仅支持完整的 \\ce{…} 化学式。');
+  const arrows = arrowTokens(source);
+  if (arrows.length) return parseChemicalEquation(input);
+  return {rows: [{items: speciesItems(source)}]};
 }

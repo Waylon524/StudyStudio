@@ -14,6 +14,7 @@ export type StudyAttempt = {
   grade: { status: 'graded' | 'pending_feedback' | 'self_assessed'; correct: boolean | null }
   feedback?: string | { feedback?: string; text?: string; correct?: boolean; score?: number; createdAt?: string } | null
 }
+export type PracticeCategory = { unit: string; knowledgePoint: string }
 export type StudyQuestion = {
   id?: string
   sourceId?: string
@@ -29,6 +30,11 @@ export type StudyQuestion = {
   explanation?: string
   tags?: string[]
   rubric?: string
+  unit?: string
+  knowledgePoint?: string
+  organizedBy?: 'ai' | 'user'
+  organizedAt?: string
+  editedAt?: string
   attempts?: StudyAttempt[]
   latestAttempt?: StudyAttempt | null
   reveals?: unknown[]
@@ -41,6 +47,7 @@ export type LearningData = {
   items: StudyQuestion[]
   attempts: StudyAttempt[]
   canvases?: SavedCanvas[]
+  categories?: PracticeCategory[]
   workspacePath?: string
   importantInfo?: string
   progress?: string | Record<string, unknown>

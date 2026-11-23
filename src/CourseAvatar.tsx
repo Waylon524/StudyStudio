@@ -1,6 +1,7 @@
 import {memo,useEffect,useId,useRef,useState,useSyncExternalStore} from 'react'
 import {createPortal} from 'react-dom'
 import {RefreshCw} from 'lucide-react'
+import {tCurrent,useI18n} from './i18n'
 import './course-avatar.css'
 
 type Primitive={type:'path';d:string}|{type:'circle';cx:number;cy:number;r:number}|{type:'ellipse';cx:number;cy:number;rx:number;ry:number}|{type:'line';x1:number;y1:number;x2:number;y2:number}|{type:'polyline';points:number[][]}
@@ -19,9 +20,9 @@ function createEntry(courseId:string){
   try{
    const response=await fetch(url,{signal:controller.signal}),data=await response.json()
    if(version!==epoch)return
-   if(!response.ok||!data.avatar||!['pending','ready','failed'].includes(data.avatar.status))throw Error('课程头像暂时不可用。')
+   if(!response.ok||!data.avatar||!['pending','ready','failed'].includes(data.avatar.status))throw Error(tCurrent('avatar.unavailable'))
    value=data.avatar;notify()
-  }catch(error){if(version!==epoch||(error as Error).name==='AbortError')return;value={...value,status:'failed',error:'头像暂时无法读取，请重试。'};notify()}
+  }catch(error){if(version!==epoch||(error as Error).name==='AbortError')return;value={...value,status:'failed',error:tCurrent('avatar.loadFailed')};notify()}
   finally{if(version===epoch){inFlight=false;controller=null;poll()}}
  }
  async function regenerate(){
@@ -29,16 +30,18 @@ function createEntry(courseId:string){
   stop();regenerating=true;const previous=value;value={status:'pending',...(previous.icon?{icon:previous.icon}:{})};notify()
   try{
    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),data=await response.json()
-   if(!response.ok||!data.avatar||!['pending','ready','failed'].includes(data.avatar.status))throw Error(data.error||'头像暂未更换，请重试。')
+   if(!response.ok||!data.avatar||!['pending','ready','failed'].includes(data.avatar.status))throw Error(data.error||tCurrent('avatar.changeFailed'))
    value=data.avatar
-  }catch(error){value={status:'failed',...(previous.icon?{icon:previous.icon}:{}),error:(error as Error).message||'头像暂未更换，请重试。'}}
+  }catch(error){value={status:'failed',...(previous.icon?{icon:previous.icon}:{}),error:(error as Error).message||tCurrent('avatar.changeFailed')}}
   finally{regenerating=false;notify();poll()}
  }
  return {getSnapshot:()=>value,regenerate,subscribe:(listener:()=>void)=>{listeners.add(listener);void read();return()=>{listeners.delete(listener);if(!listeners.size)stop()}}}
 }
 function entryFor(courseId:string){let entry=entries.get(courseId);if(!entry){entry=createEntry(courseId);entries.set(courseId,entry)}return entry}
 
-export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className='',label='课程头像',interactive=true}:Props){
+export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className='',label,interactive=true}:Props){
+ const {t}=useI18n()
+ const ariaLabel=label||t('avatar.label')
  const entry=entryFor(courseId),avatar=useSyncExternalStore(entry.subscribe,entry.getSnapshot,entry.getSnapshot)
  const [open,setOpen]=useState(false),[position,setPosition]=useState({left:0,top:0}),trigger=useRef<HTMLButtonElement>(null),menu=useRef<HTMLDivElement>(null),menuId=useId()
  const elements=Array.isArray(avatar.icon?.elements)?avatar.icon.elements:null
@@ -64,7 +67,7 @@ export const CourseAvatar=memo(function CourseAvatar({courseId,size=28,className
    }
   }):<><path d="M8 12 C14 10 19 12 24 16 C29 12 34 10 40 12 L40 36 C34 34 29 36 24 40 C19 36 14 34 8 36 Z"/><path d="M24 16 V40"/></>}</svg>
  return <span className={'course-avatar '+className} data-avatar-status={avatar.status} data-has-icon={!!elements} style={{width:size,height:size}}>
-  {interactive?<button ref={trigger} type="button" className="course-avatar-trigger" aria-label={label} aria-haspopup="menu" aria-controls={open?menuId:undefined} aria-expanded={open} onClick={toggle} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();if(!open)toggle()}}} title={avatar.status==='pending'?'正在生成课程头像':'更换课程头像'}>{svg}</button>:svg}
-  {interactive&&open&&createPortal(<div ref={menu} id={menuId} role="menu" aria-label="课程头像选项" className="course-avatar-menu" style={position}><button type="button" role="menuitem" disabled={avatar.status==='pending'} onClick={()=>{setOpen(false);void entry.regenerate();trigger.current?.focus()}}><RefreshCw size={14}/>{avatar.status==='pending'?'正在生成…':'更换头像'}</button>{avatar.status==='failed'&&avatar.error&&<p role="status">{avatar.error}</p>}</div>,document.body)}
+  {interactive?<button ref={trigger} type="button" className="course-avatar-trigger" aria-label={ariaLabel} aria-haspopup="menu" aria-controls={open?menuId:undefined} aria-expanded={open} onClick={toggle} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();if(!open)toggle()}}} title={avatar.status==='pending'?t('avatar.generating'):t('avatar.changeTitle')}>{svg}</button>:svg}
+  {interactive&&open&&createPortal(<div ref={menu} id={menuId} role="menu" aria-label={t('avatar.menuAria')} className="course-avatar-menu" style={position}><button type="button" role="menuitem" disabled={avatar.status==='pending'} onClick={()=>{setOpen(false);void entry.regenerate();trigger.current?.focus()}}><RefreshCw size={14}/>{avatar.status==='pending'?t('avatar.generatingShort'):t('avatar.regenerate')}</button>{avatar.status==='failed'&&avatar.error&&<p role="status">{avatar.error}</p>}</div>,document.body)}
  </span>
 })

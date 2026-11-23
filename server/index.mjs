@@ -8,12 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { CodexBridge } from './codex.mjs';
 import {checkedModel,checkedTurn,validatePresetConfigs} from './model-policy.mjs';
 import {DEFAULT_PRESET_CONFIGS,isValidEffort,normalizePresetConfigs} from '../shared/model-presets.mjs';
+import {isValidLocale} from '../shared/i18n.mjs';
 import { handleChemistry } from './chemistry.mjs';
 import { LearningStore } from './learning.mjs';
 import { createPageAccess } from './lazy-pdf.mjs';
 import {pdfSelectionContext} from './pdf-selection-context.mjs';
 import {PdfAnnotations} from './pdf-annotations.mjs';
 import {annotatePdf} from './pdf-annotation-tool.mjs';
+import {PdfOutlines,PdfOutlineGenerator} from './pdf-outlines.mjs';
+import {managePdfOutline} from './pdf-outline-tool.mjs';
 import {writeWorkspaceFileForAgent} from './workspace-write-tool.mjs';
 import {boundPdfRegion} from '../shared/pdf-markup.mjs';
 import { CourseRequirements } from './requirements.mjs';
@@ -32,7 +35,7 @@ import {CONTINUE_INPUT,hideContinuationInputs} from '../shared/continuation.mjs'
 const port=Number(process.env.STUDY_PORT || 4317);
 if(!Number.isInteger(port)||port<1||port>65535)throw Error('服务端口无效');
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-const appVersion=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version||'0.20.22';
+const appVersion=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version||'0.21.0';
 const dataDir=dataRoot, indexFile=path.join(dataDir,'chats.json'), coursesFile=path.join(dataDir,'courses.json'), settingsFile=path.join(dataDir,'settings.json');
 let userSettings={};
 try {const parsed=JSON.parse(await fs.readFile(settingsFile,'utf8'));if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed))userSettings=parsed;} catch(e){if(e.code!=='ENOENT')throw e}
@@ -51,6 +54,7 @@ function saveUserSettings(update){
   settingsSave=job;return job;
 }
 function currentPresetConfigs(){return normalizePresetConfigs(userSettings.presets);}
+function currentLocaleSetting(){return isValidLocale(userSettings.locale)?userSettings.locale:null;}
 const defaultCourse={id:'general',name:'通用学习'};
 let courses=[defaultCourse];
 try {const parsed=JSON.parse(await fs.readFile(coursesFile,'utf8'));if(Array.isArray(parsed)){const savedGeneral=parsed.find(x=>x?.id==='general'),general={...savedGeneral,...defaultCourse};delete general.archivedAt;courses=[general,...parsed.filter(x=>x && x.id!=='general' && typeof x.id==='string' && typeof x.name==='string').map(course=>({...course}))];}} catch(e){if(e.code!=='ENOENT')throw e}
@@ -64,6 +68,8 @@ const preparingTurns=new Set(),courseWrites=new Map();
 function retainCourseWrite(course){courseWrites.set(course.id,(courseWrites.get(course.id)||0)+1);return ()=>{const count=courseWrites.get(course.id)||0;if(count<=1)courseWrites.delete(course.id);else courseWrites.set(course.id,count-1)}}
 const store=new LearningStore();
 const pdfAnnotations=new PdfAnnotations({store});
+const pdfOutlines=new PdfOutlines({store});
+const organizingPractice=new Map();
 const bridge=new CodexBridge(), clients=new Map(), resumed=new Set(), activeTurns=new Map(), freshThreads=new Map();
 const requirements=new CourseRequirements(store);
 const schedule=new CourseSchedule({store,requirements});
@@ -86,6 +92,13 @@ const organizer=new ImportOrganizer({store,onUpdate:(course)=>{if(course.threadI
     await courseIdle(course);return {items:value.items,inspectedAttachmentIds};
   }finally{await Promise.allSettled(accesses.map(access=>access.close()));}
 }});
+const pdfOutlineGenerator=new PdfOutlineGenerator({
+  store,
+  pdfOutlines,
+  generate:args=>bridge.generatePdfOutline(args),
+  write:(course,operation)=>organizer._withFileChange(course,async()=>{requireActiveCourse(course);return operation();}),
+  onUpdate:scope=>pdfOutlineUpdated(scope),
+});
 const pendingImports=new Map(),importEnqueues=new Map();
 async function enqueueImports(course,ids){
   if(isArchived(course))return null;
@@ -118,7 +131,7 @@ function updateCourses(update){
 }
 function saveCourseThread(course,id){return updateCourses(next=>{const current=next.find(item=>item.id===course.id);if(!current)throw httpError(404,'课程不存在');if(current.archivedAt)throw httpError(409,'课程已归档，请先在设置中恢复。');current.threadId=id})}
 function courseTurnBusy(course){return preparingTurns.has(course.id)||[...activeTurns.values()].some(turn=>turn.course.id===course.id)}
-function archiveBusy(course){return courseTurnBusy(course)||courseWrites.has(course.id)||courseCreation.has(course.id)||pendingImports.has(course.id)||importEnqueues.has(course.id)||organizer.queues.has(course.id)}
+function archiveBusy(course){return courseTurnBusy(course)||courseWrites.has(course.id)||courseCreation.has(course.id)||pendingImports.has(course.id)||importEnqueues.has(course.id)||organizer.queues.has(course.id)||organizingPractice.has(course.id)||pdfOutlineGenerator.isCourseBusy(course.id)}
 async function recoverCourse(course){
   if(isArchived(course))return;const release=retainCourseWrite(course);
   try{await organizer.recover(course);if(isArchived(course))return;
@@ -149,19 +162,77 @@ function safeOrigin(req){const host=req.headers.host;if(![`127.0.0.1:${port}`,`l
 async function bytes(req){const declared=Number(req.headers['content-length']);if(Number.isFinite(declared)&&declared>MAX_MATERIAL_BYTES)throw httpError(413,'附件超过 '+MATERIAL_SIZE_LABEL);const chunks=[];let n=0;for await(const chunk of req){n+=chunk.length;if(n>MAX_MATERIAL_BYTES)throw httpError(413,'附件超过 '+MATERIAL_SIZE_LABEL);chunks.push(chunk)}return Buffer.concat(chunks)}
 function sse(id,event){for(const res of clients.get(id)||[])res.write('data: '+JSON.stringify(event)+'\n\n')}
 function pdfAnnotationsUpdated(scope){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===scope.courseId))sse(id,{method:'pdf/annotations-updated',params:scope})}
+function pdfOutlineUpdated(scope){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===scope.courseId))sse(id,{method:'pdf/outline-updated',params:scope})}
 function sourcesUpdated(course){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===course.id))sse(id,{method:'sources/updated',params:{threadId:id}})}
+function studyUpdated(course){for(const id of clients.keys())if(chats.some(row=>row.id===id&&row.courseId===course.id))sse(id,{method:'study/updated',params:{threadId:id}})}
+async function organizeCoursePractice(course,{mode='smart',locale}={}){
+  if(organizingPractice.has(course.id))return organizingPractice.get(course.id);
+  const task=(async()=>{
+    const state=await store._load(course);
+    const allItems=state.items||[];
+    if(!allItems.length)return {organizedCount:0,totalCount:0,categories:store._collectPracticeCategories(state),items:[]};
+    const uncategorized=allItems.filter(item=>!(item.unit||'').trim()&&!(item.knowledgePoint||'').trim());
+    const targetItems=mode==='all'||!uncategorized.length?allItems:uncategorized;
+    const scan=await store.scanWorkspace(course);
+    const fileManifest=scan.files.slice(0,80).map(file=>file.relativePath);
+    const resolvedLocale=isValidLocale(locale)?locale:(currentLocaleSetting()||'zh-CN');
+    const existingCategories=store._collectPracticeCategories(state);
+    const batchSize=40;
+    const assignments=[];
+    const runningCategories=[...existingCategories];
+    const seenCatKeys=new Set(runningCategories.map(c=>`${c.unit}\0${c.knowledgePoint}`));
+    for(let offset=0;offset<targetItems.length;offset+=batchSize){
+      const batch=targetItems.slice(offset,offset+batchSize).map(item=>({
+        questionId:item.id,
+        type:item.type,
+        prompt:String(item.prompt||'').slice(0,600),
+        ...(Array.isArray(item.options)?{options:item.options.slice(0,8).map(o=>String(o.text||'').slice(0,120))}:{}),
+        ...(item.explanation?{explanation:String(item.explanation).slice(0,300)}:{}),
+        ...(Array.isArray(item.tags)&&item.tags.length?{tags:item.tags.slice(0,8)}:{}),
+      }));
+      const response=await bridge.organizePracticeQuestions({
+        courseName:course.name,
+        cwd:store.coursePath(course),
+        questions:batch,
+        existingCategories:runningCategories.slice(0,80),
+        fileManifest,
+        locale:resolvedLocale,
+      });
+      const validIds=new Set(batch.map(item=>item.questionId));
+      for(const entry of response?.items||[]){
+        if(!entry||!validIds.has(entry.questionId))continue;
+        const unit=String(entry.unit||'').trim().slice(0,120);
+        const knowledgePoint=String(entry.knowledgePoint||'').trim().slice(0,120);
+        if(!unit&&!knowledgePoint)continue;
+        assignments.push({questionId:entry.questionId,unit,knowledgePoint});
+        const key=`${unit}\0${knowledgePoint}`;
+        if(!seenCatKeys.has(key)){seenCatKeys.add(key);runningCategories.push({unit,knowledgePoint});}
+      }
+    }
+    const result=await store.applyPracticeOrganization(course,assignments);
+    studyUpdated(course);
+    return result;
+  })();
+  organizingPractice.set(course.id,task);
+  try{return await task;}finally{if(organizingPractice.get(course.id)===task)organizingPractice.delete(course.id);}
+}
 function normalizeStudy(spec){
   return prepareTeachingSpec(spec).questionSpec;
 }
 bridge.toolHandler=async ({threadId,turnId,tool,arguments:args,callId})=>{
   const row=chats.find(x=>x.id===threadId);if(!row)throw Error('对话不存在');const course=courseById(row.courseId);if(!course||!args||typeof args!=='object')throw Error('课程或工具参数无效');
   if(tool==='study_render'&&args.spec?.operation==='pdf_annotate'){tool='study_pdf_annotate';args=args.spec.arguments;if(!args||typeof args!=='object'||Array.isArray(args))throw Error('PDF 批注参数无效。');}
+  if(tool==='study_render'&&args.spec?.operation==='pdf_outline'){tool='study_pdf_outline';args=args.spec.arguments;if(!args||typeof args!=='object'||Array.isArray(args))throw Error('PDF 目录参数无效。');}
   if(tool==='study_render'&&args.spec?.operation==='workspace_write'){tool='study_workspace_write';args=args.spec.arguments;if(!args||typeof args!=='object'||Array.isArray(args))throw Error('创建资料文件参数无效。');}
   if(tool==='study_render'){const request=parseAnalysisRequest(args.spec);if(request){tool=request.tool;args=request.arguments;}}
   const updateMemory=async value=>{const active=activeTurns.get(threadId),evidence=value.evidence;if(typeof evidence!=='string'||!evidence.trim()||evidence.length>1000||!active?.text.includes(evidence))throw Error('记忆依据必须是本轮用户消息中的原话。');const result=await store.updateMemory(course,{...value,source:`用户本轮消息（会话 ${threadId}）`});sse(threadId,{method:'study/updated',params:{threadId}});return result};
   if(tool==='study_pdf_annotate'){
     requireActiveCourse(course);const active=activeTurns.get(threadId),release=retainCourseWrite(course);
     try{return await annotatePdf({pdfAnnotations,course,active,args,threadId,turnId,callId,isActive:()=>activeTurns.get(threadId)===active&&!active?.completion,write:operation=>organizer._withFileChange(course,async()=>{requireActiveCourse(course);return operation()}),onUpdate:pdfAnnotationsUpdated})}finally{release()}
+  }
+  if(tool==='study_pdf_outline'){
+    requireActiveCourse(course);const active=activeTurns.get(threadId),release=retainCourseWrite(course);
+    try{return await managePdfOutline({pdfOutlines,course,active,args,threadId,turnId,callId,isActive:()=>activeTurns.get(threadId)===active&&!active?.completion,write:operation=>organizer._withFileChange(course,async()=>{requireActiveCourse(course);return operation()}),onUpdate:scope=>{pdfOutlineGenerator.clearSource(course,scope.sourceId);pdfOutlineUpdated(scope);}})}finally{release()}
   }
   if(tool==='study_workspace_write'){
     requireActiveCourse(course);const active=activeTurns.get(threadId),release=retainCourseWrite(course);
@@ -238,7 +309,14 @@ const server=http.createServer(async(req,res)=>{
   if(!safeOrigin(req))return json(res,403,{error:'访问来源不被允许'});
   const url=new URL(req.url,'http://127.0.0.1:4317');
   if(req.method==='GET'&&url.pathname==='/api/health')return json(res,200,{app:'study-studio',version:appVersion,instanceToken:process.env.STUDY_INSTANCE_TOKEN||null});
-  if(req.method==='GET'&&url.pathname==='/api/settings/info')return json(res,200,{version:appVersion,workspaceRoot:store.root,maxMaterialBytes:MAX_MATERIAL_BYTES,maxMaterialLabel:MATERIAL_SIZE_LABEL,presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+  if(req.method==='GET'&&url.pathname==='/api/settings/info')return json(res,200,{version:appVersion,workspaceRoot:store.root,maxMaterialBytes:MAX_MATERIAL_BYTES,maxMaterialLabel:MATERIAL_SIZE_LABEL,presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS,locale:currentLocaleSetting()});
+  if(req.method==='GET'&&url.pathname==='/api/settings/locale')return json(res,200,{locale:currentLocaleSetting()});
+  if(req.method==='POST'&&url.pathname==='/api/settings/locale'){
+    const v=await body(req);
+    if(!isValidLocale(v.locale))return json(res,400,{error:'不支持的语言设置。'});
+    await saveUserSettings(next=>{next.locale=v.locale;});
+    return json(res,200,{locale:currentLocaleSetting()});
+  }
   if(req.method==='GET'&&url.pathname==='/api/settings/presets')return json(res,200,{presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
   if(req.method==='POST'&&url.pathname==='/api/settings/presets'){
     const v=await body(req);
@@ -254,7 +332,7 @@ const server=http.createServer(async(req,res)=>{
     return json(res,200,{presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
   }
   if(url.pathname==='/api/chem/render' && req.method==='POST'){await handleChemistry(req,res,url);return}
-  if(req.method==='GET' && url.pathname==='/api/status')return json(res,200,{...await bridge.status({force:url.searchParams.get('refresh')==='1'}),presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS});
+  if(req.method==='GET' && url.pathname==='/api/status')return json(res,200,{...await bridge.status({force:url.searchParams.get('refresh')==='1'}),presets:currentPresetConfigs(),defaultPresets:DEFAULT_PRESET_CONFIGS,locale:currentLocaleSetting()});
   if(req.method==='GET' && url.pathname==='/api/courses'){
     await courseSave.catch(()=>{});const visible=courses.filter(course=>url.searchParams.get('includeArchived')==='true'||!course.archivedAt);
     const includeStats=url.searchParams.get('stats')==='true';
@@ -301,7 +379,42 @@ const server=http.createServer(async(req,res)=>{
       }catch(error){if(error instanceof TypeError||error instanceof SyntaxError)throw httpError(400,error.message);throw error}
     }finally{release()}
   }
-  const cr=/^\/api\/courses\/([0-9a-z-]+)\/(learning|workspace|instructions|attachments|answer-images|attempts|reveal|feedback|files\/list|files\/read|study\/register|sources|sources\/select|sources\/move|sources\/move-batch|sources\/rename|sources\/delete|folders|folders\/rename|folders\/delete|reader|requirements|imports|imports\/retry|avatar|schedule|canvas\/save|canvas\/activity)$/.exec(url.pathname);
+  const outlineRoute=/^\/api\/courses\/([0-9a-z-]+)\/pdf-outline$/.exec(url.pathname);
+  if(outlineRoute){
+    const course=requireActiveCourse(courseById(outlineRoute[1])),release=retainCourseWrite(course);
+    try{
+      if(req.method!=='GET'&&req.method!=='POST')return json(res,405,{error:'方法不支持'});
+      try{
+        if(req.method==='GET'){
+          const sourceId=url.searchParams.get('sourceId');
+          const inspect=url.searchParams.get('inspect')==='1';
+          const result=await organizer._withFileChange(course,async()=>{
+            requireActiveCourse(course);
+            return inspect?pdfOutlines.inspect(course,{sourceId}):pdfOutlines.get(course,{sourceId});
+          });
+          return json(res,200,{...result,generation:pdfOutlineGenerator.status(course,result.sourceId)});
+        }
+        const request=await body(req,2*1024*1024);
+        if(request.op==='regenerate'){
+          const resolvedLocale=isValidLocale(request.locale)?request.locale:(currentLocaleSetting()||'zh-CN');
+          const generation=await organizer._withFileChange(course,async()=>{
+            requireActiveCourse(course);
+            return pdfOutlineGenerator.regenerate(course,{sourceId:request.sourceId,locale:resolvedLocale});
+          });
+          return json(res,202,{ok:true,sourceId:request.sourceId,generation});
+        }
+        const result=await organizer._withFileChange(course,async()=>{
+          requireActiveCourse(course);
+          if(request.op==='reset'){pdfOutlineGenerator.clearSource(course,request.sourceId);return pdfOutlines.reset(course,{sourceId:request.sourceId});}
+          if(request.op==='replace'){pdfOutlineGenerator.clearSource(course,request.sourceId);return pdfOutlines.replace(course,{sourceId:request.sourceId,items:request.items},{kind:'user'});}
+          throw new TypeError('PDF 目录操作无效，仅支持 regenerate、replace 或 reset。');
+        });
+        pdfOutlineUpdated({courseId:course.id,sourceId:request.sourceId});
+        return json(res,200,{...result,generation:pdfOutlineGenerator.status(course,request.sourceId)});
+      }catch(error){if(error instanceof TypeError||error instanceof SyntaxError)throw httpError(400,error.message);throw error}
+    }finally{release()}
+  }
+  const cr=/^\/api\/courses\/([0-9a-z-]+)\/(learning|workspace|instructions|attachments|answer-images|attempts|reveal|feedback|files\/list|files\/read|study\/register|sources|sources\/select|sources\/move|sources\/move-batch|sources\/rename|sources\/delete|folders|folders\/rename|folders\/delete|reader|requirements|imports|imports\/retry|avatar|schedule|canvas\/save|canvas\/activity|practice\/organize|practice\/categories|practice\/categories\/rename|practice\/categories\/delete|practice\/questions\/update|practice\/questions\/categorize|practice\/questions\/delete)$/.exec(url.pathname);
   if(cr){const course=requireActiveCourse(courseById(cr[1])),release=req.method==='GET'?()=>{}:retainCourseWrite(course);try{const action=cr[2];
     if(req.method==='GET'&&action==='schedule')return json(res,200,await schedule.list(course));
     if(req.method==='GET'&&action==='avatar')return json(res,200,{avatar:await avatars.ensure(course)});
@@ -311,6 +424,13 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='POST'&&action==='imports'){const v=await body(req);if(!Array.isArray(v.attachmentIds)||v.attachmentIds.length>100||v.attachmentIds.some(x=>typeof x!=='string'))throw Error('待整理资料无效。');return json(res,202,{job:await enqueueImports(course,v.attachmentIds)})}
     if(req.method==='POST'&&action==='imports/retry'){const v=await body(req);return json(res,202,{job:await organizer.retry(course,v.jobId)})}
     if(req.method==='GET'&&action==='learning')return json(res,200,await store.learning(course));
+    if(req.method==='POST'&&action==='practice/organize'){const v=await body(req);return json(res,200,await organizeCoursePractice(course,{mode:v.mode==='all'?'all':'smart',locale:v.locale}))}
+    if(req.method==='POST'&&action==='practice/categories'){const v=await body(req);const result=await store.createPracticeCategory(course,v);studyUpdated(course);return json(res,200,result)}
+    if(req.method==='POST'&&action==='practice/categories/rename'){const v=await body(req);const result=await store.renamePracticeCategory(course,v);studyUpdated(course);return json(res,200,result)}
+    if(req.method==='POST'&&action==='practice/categories/delete'){const v=await body(req);const result=await store.deletePracticeCategory(course,v);studyUpdated(course);return json(res,200,result)}
+    if(req.method==='POST'&&action==='practice/questions/update'){const v=await body(req);const result=await store.updateQuestion(course,v);studyUpdated(course);return json(res,200,result)}
+    if(req.method==='POST'&&action==='practice/questions/categorize'){const v=await body(req);const result=await store.categorizeQuestions(course,v);studyUpdated(course);return json(res,200,result)}
+    if(req.method==='POST'&&action==='practice/questions/delete'){const v=await body(req);const result=await store.deleteQuestions(course,v.questionIds);studyUpdated(course);return json(res,200,result)}
     if(req.method==='POST'&&action==='canvas/save'){const v=await body(req,512*1024);if(!owned(v.threadId)||chats.find(x=>x.id===v.threadId)?.courseId!==course.id)return json(res,403,{error:'对话不属于此课程'});const result=await store.saveCanvas(course,v);sse(v.threadId,{method:'study/updated',params:{threadId:v.threadId}});return json(res,200,result)}
     if(req.method==='POST'&&action==='canvas/activity')return json(res,200,await store.recordCanvasActivity(course,await body(req)));
     if(req.method==='GET'&&action==='sources')return json(res,200,{sources:await store.listSources(course)});
@@ -318,7 +438,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='POST'&&action==='sources/move'){const v=await body(req);return json(res,200,{source:await organizer.moveAndConfirmSource(course,v)})}
     if(req.method==='POST'&&action==='sources/move-batch'){const v=await body(req);return json(res,200,await organizer.moveAndConfirmSources(course,v))}
     if(req.method==='POST'&&action==='sources/rename'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再重命名文件。');const v=await body(req);return json(res,200,{source:await organizer.renameSource(course,v)})}
-    if(req.method==='POST'&&action==='sources/delete'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再删除文件。');const v=await body(req);return json(res,200,await organizer.deleteSources(course,v.sourceIds,{onSourceDeleted:sourceId=>pdfAnnotations.removeSource(course,sourceId)}))}
+    if(req.method==='POST'&&action==='sources/delete'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再删除文件。');const v=await body(req);return json(res,200,await organizer.deleteSources(course,v.sourceIds,{onSourceDeleted:async sourceId=>{pdfOutlineGenerator.clearSource(course,sourceId);await pdfAnnotations.removeSource(course,sourceId);await pdfOutlines.removeSource(course,sourceId);}}))}
     if(req.method==='GET'&&action==='folders')return json(res,200,{folders:await store.listFolders(course)});
     if(req.method==='POST'&&action==='folders'){const v=await body(req);await store.makeFolder(course,v.path);if(course.threadId)sse(course.threadId,{method:'sources/updated',params:{threadId:course.threadId}});return json(res,200,{folders:await store.listFolders(course)})}
     if(req.method==='POST'&&action==='folders/rename'){if(courseTurnBusy(course))throw httpError(409,'当前课程正在回复，请等待回复完成后再重命名分类。');const v=await body(req);return json(res,200,await organizer.renameFolder(course,v))}

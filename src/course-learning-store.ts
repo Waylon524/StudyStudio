@@ -1,4 +1,5 @@
 import type {LearningData,StudyAttempt,StudyQuestion,StudySpec,SavedCanvas} from './study-types'
+import {tCurrent} from './i18n'
 
 const empty:LearningData={items:[],attempts:[]}
 type Snapshot={data:LearningData;loading:boolean;error:string;loaded:boolean}
@@ -20,7 +21,7 @@ export function createLearningEntry(load:()=>Promise<LearningData>){
     },error=>{
       if(version!==epoch)return
       completed=version
-      publish({loading:false,error:error instanceof Error?error.message:'学习记录暂时无法读取'})
+      publish({loading:false,error:error instanceof Error?error.message:tCurrent('practice.readError')})
     }).finally(()=>{if(pending===task)pending=null;if(version!==epoch)schedule()})
     pending=task
     publish({loading:true,error:''})
@@ -75,7 +76,7 @@ function setId(parts:unknown[]):Promise<string|null>{
   if(!result){result=globalThis.crypto?.subtle?globalThis.crypto.subtle.digest('SHA-256',new TextEncoder().encode(key)).then(buffer=>Array.from(new Uint8Array(buffer),byte=>byte.toString(16).padStart(2,'0')).join('').slice(0,24)).catch(()=>null):Promise.resolve(null);ids.set(key,result)}
   return result
 }
-const generated=new Set(['id','sourceId','setId','threadId','itemId','attempts','latestAttempt','reveals'])
+const generated=new Set(['id','sourceId','setId','threadId','itemId','attempts','latestAttempt','reveals','unit','knowledgePoint','organizedBy','organizedAt','editedAt','createdAt'])
 function stable(value:unknown):unknown{
   if(Array.isArray(value))return value.map(stable)
   if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,stable(item)]))

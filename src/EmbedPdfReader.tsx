@@ -1,17 +1,22 @@
 import { localEngine } from '@embedpdf/engine'
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ErrorInfo, ReactNode } from 'react'
-import { PDFViewer, type Viewer, type ViewerConfig, type Layout, type CommandDefinition, type EmbedPdfViewerElement } from '@embedpdf/viewer-react'
-import { ChevronLeft, ChevronRight, Download, LoaderCircle, MessageSquareQuote, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { PDFViewer, ToolbarItem, type Viewer, type ViewerConfig, type Layout, type CommandDefinition, type EmbedPdfViewerElement } from '@embedpdf/viewer-react'
+import { ChevronLeft, ChevronRight, Download, ListTree, LoaderCircle, MessageSquareQuote, RefreshCw, X } from 'lucide-react'
 import type { PdfReaderProps, PdfRegionSelection } from './PdfReader'
+import type { PdfOutlineNode } from '../shared/pdf-outline.mjs'
 import { pdfAnnotationFont } from './embedPdfAnnotationMapping'
 import { useEmbedPdfAnnotations } from './useEmbedPdfAnnotations'
+import { useEmbedPdfOutline, type EmbedPdfOutlineUpdate } from './useEmbedPdfOutline'
 import { exportAnnotatedPdf } from './exportAnnotatedPdf'
 import { installPageFrameRetention } from './embedPdfFrameRetention'
+import { LOCALE_META, tCurrent, useI18n } from './i18n'
 import './embed-pdf-reader.css'
 
 export type EmbedPdfReaderProps = PdfReaderProps & {
   annotationUpdates?: {sourceId:string;page:number;revision:number}
+  outlineUpdates?: EmbedPdfOutlineUpdate
   /** A host can retain the original reader as a recovery path. */
   onViewerError?: () => void
   onFocusQuestion?: () => void
@@ -21,7 +26,7 @@ export type EmbedPdfReaderProps = PdfReaderProps & {
 const engine = () => localEngine({fonts:[pdfAnnotationFont]})
 const fonts:ViewerConfig['fonts'] = [{...pdfAnnotationFont,label:'思源黑体'}]
 const plugins:ViewerConfig['plugins'] = {
-  stage:{flow:'paged',spread:'none',zoom:{mode:'fit-width'}},
+  stage:{flow:'paged',spread:'none',zoom:{mode:'fit-width'},turnGestures:false,scrollChaining:false},
   actions:{javascript:{enabled:false},openSequence:'off',triggers:{document:false,page:false,annotation:false}},
   annotation:{editable:['free-text','square','circle','line'],afterCreate:{select:true,tool:'default',editText:true},tools:[{id:'free-text',defaults:{fontFamily:pdfAnnotationFont.key,fontSize:18,fontColor:'#000000'}},{id:'line',defaults:{strokeWidth:2}},{id:'square',defaults:{strokeWidth:2}},{id:'circle',defaults:{strokeWidth:2}}]},
 }
@@ -34,11 +39,18 @@ const features:ViewerConfig['features'] = {
 // The viewer retains its own adaptive toolbar, popovers, text editor and handles.
 // Only the supported, persisted annotation kinds have creation buttons.
 function readerLayout(layout:Layout){
-  return layout.tabs('never').removeBar(['annotate','shapes','insert','form','redact','measure','pager']).addBar('main',{
+  return layout.tabs('never').removeBar(['annotate','shapes','insert','form','redact','measure','pager','outline']).addBar('main',{
     place:'bottom',
     start:[{id:'navigation',importance:5,items:['panel:thumbnails','panel:outline']}],
     center:[{id:'study-tools',importance:3,titleKey:'study.tools',collapse:'menu',items:['tool:pointer','tool:free-text','tool:line','tool:square','tool:circle','tool:snapshot','history:undo','history:redo']}],
     end:[{id:'zoom',importance:4,items:[{custom:'zoom',command:'menu:zoom',variants:['inline','button']}]},{id:'search',importance:3,items:['panel:search']}],
+  }).addBar('outline-actions',{
+    place:{panel:'outline'},
+    start:[{id:'regenerate',importance:5,items:[{custom:'study-outline-regenerate',grow:true}]}],
+  }).addBar('outline',{
+    place:{panel:'outline'},
+    start:[{id:'filter',items:[{custom:'outline-filter',variants:['wide','narrow']}]}],
+    end:[{id:'items',items:['outline:add','outline:expand-all','outline:collapse-all']}],
   }).panel('thumbnails',{present:{compact:'overlay',medium:'overlay',expanded:'dock'}}).panel('outline',{present:{compact:'overlay',medium:'overlay',expanded:'dock'}}).add('study:quote-text',{to:'selection',group:'selection'}).add('study:quote-region',{to:'snapshot',group:'snapshot'})
 }
 type ReaderAppState={isComposing:()=>boolean;focusQuestion:()=>void;canFocusQuestion:()=>boolean;quoteRegion:()=>void;canQuoteRegion:()=>boolean}
@@ -78,7 +90,8 @@ export function EmbedPdfReader(props:EmbedPdfReaderProps){
 }
 
 function DocumentReader(props:EmbedPdfReaderProps){
-  const {courseId,source,page,textSelectionReset=0,regionSelection,annotationUpdates,onAskSelection,onClose,onViewerError}=props
+  const {courseId,source,page,textSelectionReset=0,regionSelection,annotationUpdates,outlineUpdates,onAskSelection,onClose,onViewerError}=props
+  const {locale,t}=useI18n()
   const [viewer,setViewer]=useState<Viewer|null>(null)
   const [error,setError]=useState('')
   const [pageCount,setPageCount]=useState(0)
@@ -86,12 +99,16 @@ function DocumentReader(props:EmbedPdfReaderProps){
   const [downloadOpen,setDownloadOpen]=useState(false)
   const [exporting,setExporting]=useState(false)
   const [downloadError,setDownloadError]=useState('')
+  const [fallbackOutlineOpen,setFallbackOutlineOpen]=useState(false)
+  const [confirmRegenerateOpen,setConfirmRegenerateOpen]=useState(false)
   const root=useRef<HTMLElement>(null)
   const viewerElement=useRef<EmbedPdfViewerElement|null>(null)
   const viewerRef=useRef<Viewer|null>(null)
   const stagedRegion=useRef<PdfRegionSelection|null>(null)
   const downloadMenu=useRef<HTMLDivElement>(null)
   const downloadTrigger=useRef<HTMLButtonElement>(null)
+  const regenerateCancelRef=useRef<HTMLButtonElement>(null)
+  const prevGenerationStatus=useRef<string>('idle')
   const exportAbort=useRef<AbortController|null>(null)
   const exportBusy=useRef(false)
   const alive=useRef(true)
@@ -123,6 +140,34 @@ function DocumentReader(props:EmbedPdfReaderProps){
   }),[])
   const ready=useCallback((next:Viewer)=>setViewer(next),[])
   const annotations=useEmbedPdfAnnotations({viewer,courseId,sourceId:source.id,annotationUpdates})
+  const outlineSync=useEmbedPdfOutline({
+    viewer,
+    courseId,
+    sourceId:source.id,
+    locale,
+    readyForWrites:annotations.status!=='loading'&&annotations.status!=='error'&&!exporting,
+    outlineUpdates,
+  })
+  const outlineGenerating=outlineSync.generation.status==='generating'
+  useEffect(()=>{
+    if(prevGenerationStatus.current==='generating'&&outlineSync.generation.status==='ready'&&outlineSync.fallbackNeeded&&outlineSync.customItems){
+      setFallbackOutlineOpen(true)
+    }
+    prevGenerationStatus.current=outlineSync.generation.status
+  },[outlineSync.generation.status,outlineSync.fallbackNeeded,outlineSync.customItems])
+  useEffect(()=>{
+    if(!confirmRegenerateOpen)return
+    regenerateCancelRef.current?.focus()
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.key==='Escape'){
+        event.preventDefault()
+        event.stopPropagation()
+        setConfirmRegenerateOpen(false)
+      }
+    }
+    document.addEventListener('keydown',onKey,true)
+    return()=>document.removeEventListener('keydown',onKey,true)
+  },[confirmRegenerateOpen])
 
   useEffect(()=>{
     if(!viewer)return
@@ -174,7 +219,7 @@ function DocumentReader(props:EmbedPdfReaderProps){
     }
     const opened=viewer.documents.onOpened(attach)
     const failed=viewer.documents.onOpenFailed(({error})=>{
-      const message=error.message||'无法打开这份 PDF。'
+      const message=error.message||tCurrent('pdf.openFailed')
       setError(message);callbacks.current.onReaderError?.(message)
     })
     attach()
@@ -211,6 +256,7 @@ function DocumentReader(props:EmbedPdfReaderProps){
     if(!viewer)return
     const keydown=(event:KeyboardEvent)=>{
       if(callbacks.current.keyboardEnabled===false||event.defaultPrevented||event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||!['ArrowLeft','ArrowRight'].includes(event.key))return
+      if(window.document.querySelector('[aria-modal="true"]'))return
       const path=event.composedPath()
       if(path.some(node=>node instanceof HTMLElement&&(node.isContentEditable||node.matches('button,input,textarea,select,a,[role="button"],[role="textbox"],[role="slider"],[role="spinbutton"],[role="menu"],[role="menuitem"],[role="option"]'))))return
       // A global page shortcut must leave the composer's caret and other UI alone.
@@ -231,7 +277,7 @@ function DocumentReader(props:EmbedPdfReaderProps){
     // Scope this to navigation panels only; their bottom buttons and Escape close them.
     const style=document.createElement('style')
     style.dataset.studyNavigationHeader='true'
-    style.textContent='[data-epdf-panel="thumbnails"] [data-epdf-panel-header],[data-epdf-panel="outline"] [data-epdf-panel-header]{display:none}'
+    style.textContent='[data-epdf-panel="thumbnails"] [data-epdf-panel-header],[data-epdf-panel="outline"] [data-epdf-panel-header]{display:none}[data-epdf-panel="outline"] [data-bar="outline-actions"]{padding:8px}[data-epdf-panel="outline"] [data-bar="outline-actions"] slot[name="item:study-outline-regenerate"]{display:flex;width:100%}'
     shadow.append(style)
     const stopMotion=installNavigationExitMotion(viewer,viewerElement.current!)
     const stopFrames=installPageFrameRetention(viewer,viewerElement.current!)
@@ -265,37 +311,80 @@ function DocumentReader(props:EmbedPdfReaderProps){
       const blob=await exportAnnotatedPdf({viewer,courseId,sourceId:source.id,sourceUrl:source.url,signal:controller.signal})
       if(!alive.current||controller.signal.aborted)return
       const url=URL.createObjectURL(blob),anchor=document.createElement('a')
-      anchor.href=url;anchor.download=source.name.replace(/\.pdf$/i,'')+'（含批注）.pdf';anchor.hidden=true
+      const suffix=outlineSync.hasCustomOutline?t('pdf.exportWithOutlineSuffix'):t('pdf.exportSuffix')
+      anchor.href=url;anchor.download=source.name.replace(/\.pdf$/i,'')+suffix+'.pdf';anchor.hidden=true
       document.body.append(anchor);anchor.click();anchor.remove()
       const timer=setTimeout(()=>{URL.revokeObjectURL(url);downloadUrls.current.delete(url)},300000)
       downloadUrls.current.set(url,timer)
-    }catch(reason){if(alive.current&&!controller.signal.aborted)setDownloadError(reason instanceof Error?reason.message:'无法导出含批注的 PDF，请重试。')}
+    }catch(reason){if(alive.current&&!controller.signal.aborted)setDownloadError(reason instanceof Error?reason.message:t('pdf.exportFailed'))}
     finally{exportBusy.current=false;if(alive.current)setExporting(false);if(exportAbort.current===controller)exportAbort.current=null}
   }
-  return <section className="pdf-reader embed-pdf-reader" ref={root} aria-label="课件阅读器">
+  const askSelectionLabel=regionSelection?t('pdf.askRegion'):t('pdf.askSelection')
+  const outlineActionsBar=<div className="embed-pdf-outline-actions">
+    <button
+      type="button"
+      className="embed-pdf-outline-regenerate-btn"
+      disabled={outlineGenerating}
+      aria-busy={outlineGenerating||undefined}
+      onClick={()=>setConfirmRegenerateOpen(true)}
+    >
+      {outlineGenerating?<LoaderCircle size={13} className="embed-pdf-reader-export-spinner"/>:<RefreshCw size={13}/>}
+      <span>{outlineGenerating?t('pdf.regeneratingBookmarks'):t('pdf.regenerateBookmarks')}</span>
+    </button>
+    {outlineSync.generation.status==='failed'&&outlineSync.generation.error&&<div className="embed-pdf-outline-error" role="status">
+      <span>{outlineSync.generation.error}</span>
+      <button type="button" aria-label={t('pdf.dismissOutlineError')} onClick={outlineSync.dismissError}><X size={12}/></button>
+    </div>}
+  </div>
+  return <section className="pdf-reader embed-pdf-reader" ref={root} aria-label={t('pdf.readerAria')}>
     <header className="embed-pdf-reader-header">
       <strong className="embed-pdf-reader-title" title={source.name}>{source.name}</strong>
-      {onAskSelection&&<button type="button" className="embed-pdf-reader-ask" onClick={onAskSelection} aria-label={regionSelection?'用选区提问':'用选中文字提问'} title={regionSelection?'用选区提问':'用选中文字提问'}><MessageSquareQuote size={16}/><span>{regionSelection?'用选区提问':'用选中文字提问'}</span></button>}
-      <form className="embed-pdf-reader-pages" aria-label="PDF 页码" onSubmit={event=>{event.preventDefault();commitPage()}}>
-        <button type="button" className="embed-pdf-reader-icon" aria-label="上一页" title="上一页" disabled={!pageCount||page<=1} onClick={()=>navigate(viewer?.tryGet('stage')?.getCurrentPageIndex()??page-1)}><ChevronLeft size={17}/></button>
-        <input aria-label="页码" inputMode="numeric" pattern="[0-9]*" value={pageDraft} disabled={!pageCount} style={{width:Math.max(String(pageCount).length,2)+.5+'ch'}} onChange={event=>setPageDraft(event.target.value)} onBlur={commitPage}/>
+      {outlineSync.fallbackNeeded&&outlineSync.customItems&&<button type="button" className={'embed-pdf-reader-icon'+(fallbackOutlineOpen?' is-active':'')} aria-label={t('pdf.outline')} title={t('pdf.outline')} aria-expanded={fallbackOutlineOpen} onClick={()=>setFallbackOutlineOpen(v=>!v)}><ListTree size={16}/></button>}
+      {onAskSelection&&<button type="button" className="embed-pdf-reader-ask" onClick={onAskSelection} aria-label={askSelectionLabel} title={askSelectionLabel}><MessageSquareQuote size={16}/><span>{askSelectionLabel}</span></button>}
+      <form className="embed-pdf-reader-pages" aria-label={t('pdf.pagesAria')} onSubmit={event=>{event.preventDefault();commitPage()}}>
+        <button type="button" className="embed-pdf-reader-icon" aria-label={t('pdf.prevPage')} title={t('pdf.prevPage')} disabled={!pageCount||page<=1} onClick={()=>navigate(viewer?.tryGet('stage')?.getCurrentPageIndex()??page-1)}><ChevronLeft size={17}/></button>
+        <input aria-label={t('pdf.pageInputAria')} inputMode="numeric" pattern="[0-9]*" value={pageDraft} disabled={!pageCount} style={{width:Math.max(String(pageCount).length,2)+.5+'ch'}} onChange={event=>setPageDraft(event.target.value)} onBlur={commitPage}/>
         <span className="embed-pdf-reader-page-count">/ {pageCount||'—'}</span>
-        <button type="button" className="embed-pdf-reader-icon" aria-label="下一页" title="下一页" disabled={!pageCount||page>=pageCount} onClick={()=>navigate((viewer?.tryGet('stage')?.getCurrentPageIndex()??page-1)+2)}><ChevronRight size={17}/></button>
+        <button type="button" className="embed-pdf-reader-icon" aria-label={t('pdf.nextPage')} title={t('pdf.nextPage')} disabled={!pageCount||page>=pageCount} onClick={()=>navigate((viewer?.tryGet('stage')?.getCurrentPageIndex()??page-1)+2)}><ChevronRight size={17}/></button>
       </form>
       <div className="embed-pdf-reader-download" ref={downloadMenu} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setDownloadOpen(false)}}>
-        <button type="button" className="embed-pdf-reader-icon" ref={downloadTrigger} aria-label="下载 PDF" title={exporting?'正在导出 PDF…':'下载 PDF'} aria-haspopup="menu" aria-expanded={downloadOpen} onClick={()=>setDownloadOpen(open=>!open)}>{exporting?<LoaderCircle size={17} className="embed-pdf-reader-export-spinner"/>:<Download size={17}/>}</button>
-        {downloadOpen&&<div className="embed-pdf-reader-download-menu" role="menu" aria-label="下载 PDF">
-          <a role="menuitem" href={source.url} download={source.name} onClick={()=>setDownloadOpen(false)}>下载原件</a>
-          <button type="button" role="menuitem" disabled={!viewer||exporting||annotations.status==='loading'||annotations.status==='error'} onClick={()=>void downloadAnnotated()}>{exporting?'正在导出…':'导出带批注的 PDF'}</button>
+        <button type="button" className="embed-pdf-reader-icon" ref={downloadTrigger} aria-label={t('pdf.download')} title={exporting?t('pdf.exporting'):t('pdf.download')} aria-haspopup="menu" aria-expanded={downloadOpen} onClick={()=>setDownloadOpen(open=>!open)}>{exporting?<LoaderCircle size={17} className="embed-pdf-reader-export-spinner"/>:<Download size={17}/>}</button>
+        {downloadOpen&&<div className="embed-pdf-reader-download-menu" role="menu" aria-label={t('pdf.download')}>
+          <a role="menuitem" href={source.url} download={source.name} onClick={()=>setDownloadOpen(false)}>{t('pdf.downloadOriginal')}</a>
+          <button type="button" role="menuitem" disabled={!viewer||exporting||annotations.status==='loading'||annotations.status==='error'} onClick={()=>void downloadAnnotated()}>{exporting?t('pdf.exportingShort'):outlineSync.hasCustomOutline?t('pdf.exportAnnotatedAndOutline'):t('pdf.exportAnnotated')}</button>
         </div>}
       </div>
-      <button type="button" className="embed-pdf-reader-icon" aria-label="关闭阅读器" title="关闭阅读器" onClick={onClose}><X size={18}/></button>
+      <button type="button" className="embed-pdf-reader-icon" aria-label={t('pdf.closeReader')} title={t('pdf.closeReader')} onClick={onClose}><X size={18}/></button>
     </header>
     <div className="embed-pdf-reader-viewer">
-      <PDFViewer className="study-embed-viewer" elementRef={viewerElement} src={source.url} onReady={ready} engine={engine} fonts={fonts} plugins={plugins} features={features} commands={commands} appState={appState} strings={strings} layout={readerLayout} locale="zh-CN" theme={{preference:'light',accent:'#9a634c'}} warnBeforeLeaving={false} readOnly={exporting||annotations.status==='loading'||annotations.status==='error'}/>
+      {outlineSync.fallbackNeeded&&fallbackOutlineOpen&&outlineSync.customItems&&<aside className="embed-pdf-fallback-outline" aria-label={t('pdf.outline')}>
+        <div className="embed-pdf-fallback-outline-head"><span>{t('pdf.outline')}</span><button type="button" aria-label={t('app.close')} onClick={()=>setFallbackOutlineOpen(false)}><X size={14}/></button></div>
+        <div className="embed-pdf-fallback-outline-bar">{outlineActionsBar}</div>
+        <div className="embed-pdf-fallback-outline-list"><FallbackOutlineTree items={outlineSync.customItems} onSelect={target=>{navigate(target);if(window.innerWidth<900)setFallbackOutlineOpen(false)}}/></div>
+      </aside>}
+      <PDFViewer className="study-embed-viewer" elementRef={viewerElement} src={source.url} onReady={ready} engine={engine} fonts={fonts} plugins={plugins} features={features} commands={commands} appState={appState} strings={strings} layout={readerLayout} locale={LOCALE_META[locale].embedPdfLocale} theme={{preference:'light',accent:'#9a634c'}} warnBeforeLeaving={false} readOnly={exporting||annotations.status==='loading'||annotations.status==='error'}>
+        <ToolbarItem id="study-outline-regenerate">{outlineActionsBar}</ToolbarItem>
+      </PDFViewer>
     </div>
-    {(error||downloadError||annotations.status==='error')&&<div className="embed-pdf-reader-error" role="status"><span>{error||downloadError||annotations.error}</span>{annotations.status==='error'&&<button type="button" onClick={annotations.retry}>重试保存</button>}{error&&onViewerError&&<button type="button" onClick={onViewerError}>使用原阅读器</button>}</div>}
+    {(error||downloadError||annotations.status==='error')&&<div className="embed-pdf-reader-error" role="status"><span>{error||downloadError||annotations.error}</span>{annotations.status==='error'&&<button type="button" onClick={annotations.retry}>{t('pdf.retrySave')}</button>}{error&&onViewerError&&<button type="button" onClick={onViewerError}>{t('pdf.useLegacyReader')}</button>}</div>}
+    {confirmRegenerateOpen&&createPortal(<div className="pdf-outline-confirm-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setConfirmRegenerateOpen(false)}}>
+      <div className="pdf-outline-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="pdf-outline-confirm-title" aria-describedby="pdf-outline-confirm-desc">
+        <h2 id="pdf-outline-confirm-title">{t('pdf.regenerateBookmarksConfirmTitle')}</h2>
+        <p id="pdf-outline-confirm-desc">{t('pdf.regenerateBookmarksConfirmBody',{name:source.name})}</p>
+        <div className="pdf-outline-confirm-actions">
+          <button ref={regenerateCancelRef} type="button" className="pdf-outline-confirm-cancel" onClick={()=>setConfirmRegenerateOpen(false)}>{t('app.cancel')}</button>
+          <button type="button" className="pdf-outline-confirm-primary" disabled={outlineGenerating} onClick={()=>{setConfirmRegenerateOpen(false);void outlineSync.regenerate()}}>{t('pdf.regenerateBookmarksConfirmAction')}</button>
+        </div>
+      </div>
+    </div>,document.body)}
   </section>
+}
+
+function FallbackOutlineTree({items,onSelect,depth=0}:{items:PdfOutlineNode[];onSelect:(page:number)=>void;depth?:number}){
+  return <ul className={depth>0?'is-nested':undefined}>{items.map((item,idx)=><li key={idx}>
+    <button type="button" onClick={()=>onSelect(item.page)} title={item.title}><span>{item.title}</span><small>{item.page}</small></button>
+    {item.children&&item.children.length>0&&<FallbackOutlineTree items={item.children} onSelect={onSelect} depth={depth+1}/>}
+  </li>)}</ul>
 }
 /** The SDK removes closed panels immediately. Retain only its detached pixels for
  * a brief, inert exit; document layout and every real control close immediately. */
@@ -324,6 +413,7 @@ function installNavigationExitMotion(viewer:Viewer,element:EmbedPdfViewerElement
       panel.removeAttribute('data-epdf-panel');panel.removeAttribute('id');panel.removeAttribute('role')
       panel.inert=true;panel.setAttribute('aria-hidden','true')
       panel.querySelector<HTMLElement>('[data-epdf-panel-header]')?.setAttribute('hidden','')
+      for(const slot of panel.querySelectorAll('slot'))slot.remove()
       Object.assign(panel.style,{position:'absolute',inset:'0',width:'100%',height:'100%',minWidth:'0',maxWidth:'none',margin:'0',transform:'none',translate:'none',transition:'none',pointerEvents:'none'})
       ghost.append(panel);exit.parent.append(ghost)
       const direction=getComputedStyle(exit.parent).direction==='rtl'?'100%':'-100%'
@@ -367,6 +457,6 @@ function installNavigationExitMotion(viewer:Viewer,element:EmbedPdfViewerElement
 class ReaderBoundary extends Component<{children:ReactNode;onError?: (message:string)=>void;onFallback?:()=>void},{failed:boolean}>{
   state={failed:false}
   static getDerivedStateFromError(){return{failed:true}}
-  componentDidCatch(error:Error,_info:ErrorInfo){this.props.onError?.(error.message||'阅读器暂时无法打开。')}
-  render(){return this.state.failed?<div className="embed-pdf-reader-error" role="alert">阅读器暂时无法打开。{this.props.onFallback&&<button type="button" onClick={this.props.onFallback}>使用原阅读器</button>}</div>:this.props.children}
+  componentDidCatch(error:Error,_info:ErrorInfo){this.props.onError?.(error.message||tCurrent('pdf.readerUnavailable'))}
+  render(){return this.state.failed?<div className="embed-pdf-reader-error" role="alert">{tCurrent('pdf.readerUnavailable')}{this.props.onFallback&&<button type="button" onClick={this.props.onFallback}>{tCurrent('pdf.useLegacyReader')}</button>}</div>:this.props.children}
 }

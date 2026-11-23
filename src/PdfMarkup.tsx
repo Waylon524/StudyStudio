@@ -4,6 +4,7 @@ import {Circle,Grip,Minus,MousePointer2,Pencil,Scan,Square,Trash2,Type} from 'lu
 import type {PdfAnnotation,PdfMarkupColor,PdfRegion,PdfShapeAnnotation,PdfTextAnnotation} from '../shared/pdf-markup.mjs'
 import {usePdfAnnotations} from './usePdfAnnotations'
 import {usePdfMarkupInspector} from './usePdfMarkupInspector'
+import {useI18n,type MessageKey} from './i18n'
 import './pdf-markup.css'
 
 export type PdfRegionSelection={sourceId:string;page:number;region:PdfRegion}
@@ -12,10 +13,10 @@ type Point={x:number;y:number}
 type MoveGesture={pointerId:number;tool:'move';clientStart:Point;pageWidth:number;pageHeight:number;annotation:PdfAnnotation}
 type Gesture=MoveGesture|{pointerId:number;start:Point;tool:'line'|'rectangle'|'ellipse'|'region'}
 type Props={courseId:string;sourceId:string;page:number;enabled:boolean;readOnly?:boolean;refreshRevision?:number;pageSize:{width:number;height:number}|null;sheetRef:RefObject<HTMLDivElement|null>;regionSelection?:PdfRegionSelection|null;onRegionSelectionChange?:(selection:PdfRegionSelection|null)=>void}
-const colors:{id:PdfMarkupColor;label:string;value:string}[]=[{id:'black',label:'黑色',value:'#171717'},{id:'red',label:'红色',value:'#d52d29'},{id:'blue',label:'蓝色',value:'#245cdb'},{id:'yellow',label:'黄色',value:'#e9b818'},{id:'green',label:'绿色',value:'#27863c'},{id:'white',label:'白色',value:'#fff'}]
+const colors:{id:PdfMarkupColor;labelKey:MessageKey;value:string}[]=[{id:'black',labelKey:'pdf.markup.color.black',value:'#171717'},{id:'red',labelKey:'pdf.markup.color.red',value:'#d52d29'},{id:'blue',labelKey:'pdf.markup.color.blue',value:'#245cdb'},{id:'yellow',labelKey:'pdf.markup.color.yellow',value:'#e9b818'},{id:'green',labelKey:'pdf.markup.color.green',value:'#27863c'},{id:'white',labelKey:'pdf.markup.color.white',value:'#fff'}]
 const colorValue=(color:PdfMarkupColor)=>colors.find(value=>value.id===color)?.value||'#171717'
 const bound=(value:number,min=0,max=1)=>Math.min(max,Math.max(min,value))
-const kindLabel=(kind:PdfAnnotation['kind'])=>({text:'文字',line:'直线',rectangle:'矩形',ellipse:'椭圆'})[kind]
+const kindLabelKey=(kind:PdfAnnotation['kind']):MessageKey=>({text:'pdf.markup.kind.text',line:'pdf.markup.kind.line',rectangle:'pdf.markup.kind.rectangle',ellipse:'pdf.markup.kind.ellipse'} as const)[kind]
 function regionBetween(start:Point,end:Point):PdfRegion{return {x:Math.min(start.x,end.x),y:Math.min(start.y,end.y),width:Math.abs(end.x-start.x),height:Math.abs(end.y-start.y)}}
 function translated(annotation:PdfAnnotation,dx:number,dy:number):PdfAnnotation{
   const xs=annotation.kind==='text'?[annotation.x]:[annotation.x,annotation.endX],ys=annotation.kind==='text'?[annotation.y]:[annotation.y,annotation.endY]
@@ -45,6 +46,7 @@ function MarkupNumber({label,value,min,max,disabled,onCommit}:{label:string;valu
 }
 
 export function PdfMarkup({courseId,sourceId,page,enabled,pageSize,sheetRef,regionSelection,onRegionSelectionChange,readOnly=false,refreshRevision}:Props){
+  const {t}=useI18n()
   const {annotations,status,error,upsert,remove,retry}=usePdfAnnotations(courseId,sourceId,page,enabled,refreshRevision)
   const [tool,setTool]=useState<Tool>('select'),[color,setColor]=useState<PdfMarkupColor>('black'),[fontSize,setFontSize]=useState(16),[strokeWidth,setStrokeWidth]=useState(2)
   const [selectedId,setSelectedId]=useState<string|null>(null),[editingText,setEditingText]=useState<PdfTextAnnotation|null>(null),[moving,setMoving]=useState<PdfAnnotation|null>(null),[draftShape,setDraftShape]=useState<PdfShapeAnnotation|null>(null),[draftRegion,setDraftRegion]=useState<PdfRegion|null>(null)
@@ -240,12 +242,12 @@ export function PdfMarkup({courseId,sourceId,page,enabled,pageSize,sheetRef,regi
       if(next.kind==='text'){editingRef.current=next;setEditingText(next)}save(next)
     }
   }
-  const tools=[{id:'select',label:'选择文字',icon:MousePointer2},{id:'text',label:'添加文字标注',icon:Type},{id:'line',label:'画直线',icon:Minus},{id:'rectangle',label:'画矩形',icon:Square},{id:'ellipse',label:'画椭圆',icon:Circle},{id:'region',label:'框选区域',icon:Scan}] as const
-  const overlay=enabled&&sheet&&pageSize?<svg ref={svgRef} className={'pdf-markup-layer'+(tool!=='select'&&enabled&&(tool==='region'||interactive)?' is-drawing':'')} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="group" aria-label="PDF 标注页面" tabIndex={tool==='select'?-1:0} data-pdf-markup="page" data-tool={tool} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={cancel} onLostPointerCapture={cancel} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();changeTool('select')}}}>
+  const tools=[{id:'select',label:t('pdf.markup.select'),icon:MousePointer2},{id:'text',label:t('pdf.markup.text'),icon:Type},{id:'line',label:t('pdf.markup.line'),icon:Minus},{id:'rectangle',label:t('pdf.markup.rectangle'),icon:Square},{id:'ellipse',label:t('pdf.markup.ellipse'),icon:Circle},{id:'region',label:t('pdf.markup.region'),icon:Scan}] as const
+  const overlay=enabled&&sheet&&pageSize?<svg ref={svgRef} className={'pdf-markup-layer'+(tool!=='select'&&enabled&&(tool==='region'||interactive)?' is-drawing':'')} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="group" aria-label={t('pdf.markup.pageAria')} tabIndex={tool==='select'?-1:0} data-pdf-markup="page" data-tool={tool} onPointerDown={start} onPointerMove={move} onPointerUp={finish} onPointerCancel={cancel} onLostPointerCapture={cancel} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();changeTool('select')}}}>
     {region&&<rect className="pdf-region-selection" data-pdf-region-selection="true" x={region.x*width} y={region.y*height} width={region.width*width} height={region.height*height} vectorEffect="non-scaling-stroke"/>}
     {displayAnnotations.filter((annotation):annotation is PdfShapeAnnotation=>annotation.kind!=='text').map(annotation=>{
       const active=annotation.id===selectedId
-      return <g key={annotation.id} role="button" tabIndex={0} aria-label={`${kindLabel(annotation.kind)}标注`} aria-pressed={active} data-pdf-annotation={annotation.id} className={'pdf-markup-item'+(active?' is-selected':'')} onPointerDown={event=>startMove(event,annotation)} onClick={event=>{event.stopPropagation();if(ignoreClick.current===annotation.id){ignoreClick.current=null;return}select(annotation)}} onKeyDown={event=>itemKey(event,annotation)}>
+      return <g key={annotation.id} role="button" tabIndex={0} aria-label={t('pdf.markup.shapeAria',{kind:t(kindLabelKey(annotation.kind))})} aria-pressed={active} data-pdf-annotation={annotation.id} className={'pdf-markup-item'+(active?' is-selected':'')} onPointerDown={event=>startMove(event,annotation)} onClick={event=>{event.stopPropagation();if(ignoreClick.current===annotation.id){ignoreClick.current=null;return}select(annotation)}} onKeyDown={event=>itemKey(event,annotation)}>
         <Shape annotation={annotation} width={width} height={height}/><Shape annotation={annotation} width={width} height={height} hit/>
       </g>
     })}
@@ -255,15 +257,15 @@ export function PdfMarkup({courseId,sourceId,page,enabled,pageSize,sheetRef,regi
   const textNotes=enabled&&sheet&&pageSize?<div ref={textSurfaceRef} className={'pdf-markup-text-surface'+(tool!=='select'?' is-drawing':'')} data-pdf-markup="notes" style={{width,height}}>
     {displayAnnotations.filter((annotation):annotation is PdfTextAnnotation=>annotation.kind==='text').map(annotation=>{
       const active=annotation.id===selectedId,editing=active&&editingText?.id===annotation.id
-      return <div key={annotation.id} role="group" tabIndex={editing?-1:0} aria-label={'文字标注'+(annotation.text?'：'+annotation.text.slice(0,60):'')} data-pdf-annotation={annotation.id} className={'pdf-markup-note'+(active?' is-selected':'')} style={{left:annotation.x*width,top:annotation.y*height,maxWidth:Math.max(1,(1-annotation.x)*width),fontSize:annotation.fontSize,color:colorValue(annotation.color)}} onClick={event=>{
+      return <div key={annotation.id} role="group" tabIndex={editing?-1:0} aria-label={t('pdf.markup.textAria')+(annotation.text?': '+annotation.text.slice(0,60):'')} data-pdf-annotation={annotation.id} className={'pdf-markup-note'+(active?' is-selected':'')} style={{left:annotation.x*width,top:annotation.y*height,maxWidth:Math.max(1,(1-annotation.x)*width),fontSize:annotation.fontSize,color:colorValue(annotation.color)}} onClick={event=>{
         event.stopPropagation();if(event.target instanceof HTMLTextAreaElement)return
         if(ignoreClick.current===annotation.id){ignoreClick.current=null;return}select(annotation)
       }} onKeyDown={event=>{if(event.target===event.currentTarget)itemKey(event,annotation)}}>
         <div className={'pdf-markup-note-box'+(editing?' is-editing':'')} data-pdf-annotation-anchor="true">
-          <span className="pdf-markup-note-mirror" aria-hidden={editing||undefined}>{(annotation.text||'输入文字…')+'\u200b'}</span>
-          {editing&&<textarea autoFocus className="pdf-markup-inline-editor" aria-label="标注文字" placeholder="输入文字…" rows={1} maxLength={4000} value={annotation.text} disabled={!interactive} onChange={event=>updateText(event.currentTarget.value)} onCompositionStart={()=>{composition.current=true}} onCompositionEnd={event=>{composition.current=false;updateText(event.currentTarget.value,false)}} onBlur={event=>{const note=editingRef.current;if(note)flushText({...note,text:event.currentTarget.value})}}/>}
+          <span className="pdf-markup-note-mirror" aria-hidden={editing||undefined}>{(annotation.text||t('pdf.markup.inputPlaceholder'))+'\u200b'}</span>
+          {editing&&<textarea autoFocus className="pdf-markup-inline-editor" aria-label={t('pdf.markup.noteInputAria')} placeholder={t('pdf.markup.inputPlaceholder')} rows={1} maxLength={4000} value={annotation.text} disabled={!interactive} onChange={event=>updateText(event.currentTarget.value)} onCompositionStart={()=>{composition.current=true}} onCompositionEnd={event=>{composition.current=false;updateText(event.currentTarget.value,false)}} onBlur={event=>{const note=editingRef.current;if(note)flushText({...note,text:event.currentTarget.value})}}/>}
         </div>
-        {active&&<button type="button" className="pdf-markup-note-move" aria-label="移动文字标注" title="拖动移动文字" onPointerDown={event=>startMove(event,annotation)} onClick={event=>event.stopPropagation()}><Grip size={12}/></button>}
+        {active&&<button type="button" className="pdf-markup-note-move" aria-label={t('pdf.markup.moveNote')} title={t('pdf.markup.moveNoteTitle')} onPointerDown={event=>startMove(event,annotation)} onClick={event=>event.stopPropagation()}><Grip size={12}/></button>}
       </div>
     })}
   </div>:null
@@ -271,20 +273,20 @@ export function PdfMarkup({courseId,sourceId,page,enabled,pageSize,sheetRef,regi
   const activeTool=tools.find(item=>item.id===tool)||tools[0],ActiveIcon=tool==='select'?Pencil:activeTool.icon
   const showInspector=Boolean(error||selected||tool==='text'||['line','rectangle','ellipse'].includes(tool))
   return <div ref={rootRef} className="pdf-markup" data-pdf-markup="tools" onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape'){event.preventDefault();changeTool('select');restoreToolFocus()}}}>
-    <div className="pdf-markup-toolbar" role="toolbar" aria-label="PDF 标注工具" aria-busy={status==='saving'}>
+    <div className="pdf-markup-toolbar" role="toolbar" aria-label={t('pdf.markup.toolbarAria')} aria-busy={status==='saving'}>
       <div className="pdf-markup-inline-tools">{toolButtons}</div>
-      <button ref={menuTrigger} type="button" className="pdf-markup-tool pdf-markup-menu-trigger" aria-label="标注工具" title={'标注工具：'+activeTool.label} aria-expanded={menuOpen} aria-pressed={tool!=='select'||Boolean(selected)} disabled={!enabled} onClick={()=>{commitFocusedInput();flushText();setMenuOpen(value=>!value)}}><ActiveIcon size={17}/></button>
-      {menuOpen&&<div className="pdf-markup-tool-popover" role="group" aria-label="标注工具菜单">{toolButtons}</div>}
+      <button ref={menuTrigger} type="button" className="pdf-markup-tool pdf-markup-menu-trigger" aria-label={t('pdf.markup.toolTriggerAria')} title={t('pdf.markup.toolTriggerTitle',{tool:activeTool.label})} aria-expanded={menuOpen} aria-pressed={tool!=='select'||Boolean(selected)} disabled={!enabled} onClick={()=>{commitFocusedInput();flushText();setMenuOpen(value=>!value)}}><ActiveIcon size={17}/></button>
+      {menuOpen&&<div className="pdf-markup-tool-popover" role="group" aria-label={t('pdf.markup.menuAria')}>{toolButtons}</div>}
     </div>
-    {showInspector&&!menuOpen&&<div ref={panelRef} className={'pdf-markup-inspector'+(selected?' is-anchored':'')} role="group" aria-label="批注参数">
+    {showInspector&&!menuOpen&&<div ref={panelRef} className={'pdf-markup-inspector'+(selected?' is-anchored':'')} role="group" aria-label={t('pdf.markup.inspectorAria')}>
       <div className="pdf-markup-parameters">
-      <select aria-label="标注颜色" value={activeColor} disabled={!interactive} onChange={event=>{const next=event.target.value as PdfMarkupColor;setColor(next);patchSelected({color:next})}}>{colors.map(color=><option key={color.id} value={color.id}>{color.label}</option>)}</select>
-      {(tool==='text'||selected?.kind==='text')&&<label className="pdf-markup-number">字号<MarkupNumber key={(selectedId||'new')+':font'} label="文字大小" min={8} max={96} value={selected?.kind==='text'?selected.fontSize:fontSize} disabled={!interactive} onCommit={value=>{setFontSize(value);patchSelected({fontSize:value})}}/></label>}
-      {(['line','rectangle','ellipse'].includes(tool)||selected&&selected.kind!=='text')&&<label className="pdf-markup-number">线宽<MarkupNumber key={(selectedId||'new')+':stroke'} label="线宽" min={1} max={16} value={selected&&selected.kind!=='text'?selected.strokeWidth:strokeWidth} disabled={!interactive} onCommit={value=>{setStrokeWidth(value);patchSelected({strokeWidth:value})}}/></label>}
-      {selected&&<button type="button" className="pdf-markup-tool pdf-markup-delete" aria-label="删除标注" title="删除标注" disabled={!interactive} onClick={()=>deleteSelected()}><Trash2 size={15}/></button>}
+      <select aria-label={t('pdf.markup.colorAria')} value={activeColor} disabled={!interactive} onChange={event=>{const next=event.target.value as PdfMarkupColor;setColor(next);patchSelected({color:next})}}>{colors.map(color=><option key={color.id} value={color.id}>{t(color.labelKey)}</option>)}</select>
+      {(tool==='text'||selected?.kind==='text')&&<label className="pdf-markup-number">{t('pdf.markup.fontSize')}<MarkupNumber key={(selectedId||'new')+':font'} label={t('pdf.markup.fontSizeAria')} min={8} max={96} value={selected?.kind==='text'?selected.fontSize:fontSize} disabled={!interactive} onCommit={value=>{setFontSize(value);patchSelected({fontSize:value})}}/></label>}
+      {(['line','rectangle','ellipse'].includes(tool)||selected&&selected.kind!=='text')&&<label className="pdf-markup-number">{t('pdf.markup.strokeWidth')}<MarkupNumber key={(selectedId||'new')+':stroke'} label={t('pdf.markup.strokeWidth')} min={1} max={16} value={selected&&selected.kind!=='text'?selected.strokeWidth:strokeWidth} disabled={!interactive} onCommit={value=>{setStrokeWidth(value);patchSelected({strokeWidth:value})}}/></label>}
+      {selected&&<button type="button" className="pdf-markup-tool pdf-markup-delete" aria-label={t('pdf.markup.delete')} title={t('pdf.markup.delete')} disabled={!interactive} onClick={()=>deleteSelected()}><Trash2 size={15}/></button>}
       </div>
 
-    {error&&<div className="pdf-markup-error" role="alert"><span>{error}</span><button type="button" onClick={retry}>重试保存</button></div>}
+    {error&&<div className="pdf-markup-error" role="alert"><span>{error}</span><button type="button" onClick={retry}>{t('pdf.retrySave')}</button></div>}
     </div>}
     {overlay&&createPortal(overlay,sheet!)}
     {textNotes&&createPortal(textNotes,sheet!)}

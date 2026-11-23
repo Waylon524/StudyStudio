@@ -14,5 +14,5 @@ export function isValidModelId(value:unknown):value is string;
 export function isValidEffort(value:unknown):value is string|null;
 export function normalizePresetConfigs(raw:unknown):ThinkingPresetConfigs;
 export function thinkingPreset(value:ThinkingPreset,configs?:ThinkingPresetOverride|ThinkingPresetConfigs):Readonly<ThinkingPresetSlot>;
-export function effortLabel(effort:ReasoningEffort):string;
+export function effortLabel(effort:ReasoningEffort,locale?:string):string;
 export function restoreThinkingPreset(value:string|null,legacyEffort:string|null):ThinkingPreset;

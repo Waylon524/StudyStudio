@@ -1,4 +1,4 @@
-import { parseChemicalEquation } from '../shared/chemical-equation.mjs';
+import { parseChemicalEquation, parseChemicalFormula } from '../shared/chemical-equation.mjs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -24,10 +24,14 @@ export async function handleChemistry(req, res, url) {
       body += chunk.toString('utf8');
     }
     const data = JSON.parse(body);
-    if (!data || !['molecule','reaction','mechanism','equation'].includes(data.kind) || !['string','object'].includes(typeof data.source) || data.source === null) throw new Error('Provide a valid kind and source.');
+    if (!data || !['molecule','reaction','mechanism','equation','formula'].includes(data.kind) || !['string','object'].includes(typeof data.source) || data.source === null) throw new Error('Provide a valid kind and source.');
     if (data.kind === 'equation') {
       if (typeof data.source !== 'string') throw new Error('Chemical equation requires formula text.');
       data.source = parseChemicalEquation(data.source);
+      data.kind = 'reaction';
+    } else if (data.kind === 'formula') {
+      if (typeof data.source !== 'string') throw new Error('Chemical formula requires formula text.');
+      data.source = parseChemicalFormula(data.source);
       data.kind = 'reaction';
     }
     const result = await new Promise((resolve, reject) => {

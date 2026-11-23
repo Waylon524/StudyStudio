@@ -50,7 +50,7 @@ export function thinkingPreset(value,configs){
   return {label:fallback.label,model,effort};
 }
 
-const EFFORT_LABELS=Object.freeze({
+const EFFORT_LABELS_ZH=Object.freeze({
   none:'关闭 (none)',
   minimal:'极简 (minimal)',
   low:'低 (low)',
@@ -60,9 +60,21 @@ const EFFORT_LABELS=Object.freeze({
   max:'最高 (max)',
 });
 
-export function effortLabel(effort){
-  if(!effort)return '默认';
-  return Object.hasOwn(EFFORT_LABELS,effort)?EFFORT_LABELS[effort]:effort;
+const EFFORT_LABELS_EN=Object.freeze({
+  none:'None',
+  minimal:'Minimal',
+  low:'Low',
+  medium:'Medium',
+  high:'High',
+  xhigh:'Extra High',
+  max:'Max',
+});
+
+export function effortLabel(effort,locale='zh-CN'){
+  const isEn=typeof locale==='string'&&locale.toLowerCase().startsWith('en');
+  if(!effort)return isEn?'Default':'默认';
+  const table=isEn?EFFORT_LABELS_EN:EFFORT_LABELS_ZH;
+  return Object.hasOwn(table,effort)?table[effort]:effort;
 }
 
 // The old preference overloaded xhigh as a UI sentinel. It never becomes the

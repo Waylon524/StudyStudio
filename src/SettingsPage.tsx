@@ -1,16 +1,18 @@
 import {useEffect,useMemo,useRef,useState} from 'react'
-import {BookOpen,CalendarClock,FolderOpen,SlidersHorizontal,X} from 'lucide-react'
+import {BookOpen,CalendarClock,FolderOpen,GraduationCap,SlidersHorizontal,X} from 'lucide-react'
 import type {ThinkingPreset,ThinkingPresetConfigs,ThinkingPresetOverride} from '../shared/model-presets.mjs'
 import {CourseAvatar} from './CourseAvatar'
 import {DailyCourseManagement,type RequirementSource} from './CourseRequirements'
+import {useI18n} from './i18n'
 import {SettingsCourses} from './SettingsCourses'
 import {SettingsGeneral} from './SettingsGeneral'
 import {SettingsMaterials} from './SettingsMaterials'
+import {SettingsPractice} from './SettingsPractice'
 import type {CatalogModel,ManagedCourse,ManagedSource,SettingsInfo} from './settings-types'
 import './settings.css'
 
 export type {CatalogModel,ManagedCourse,ManagedSource}
-export type SettingsSection='materials'|'courses'|'daily'|'general'
+export type SettingsSection='materials'|'practice'|'courses'|'daily'|'general'
 
 type Props={
  courses:ManagedCourse[]
@@ -43,21 +45,13 @@ type Props={
  revision?:number
 }
 
-const collator=new Intl.Collator('zh-CN',{numeric:true,sensitivity:'base'})
-
-const SECTION_META:Record<SettingsSection,{title:string;subtitle:string;navLabel:string}>={
- materials:{navLabel:'资料与课件',title:'资料与课件',subtitle:'上传、分类、重命名、移动或清理各课程的 PDF 课件与学习资料。'},
- courses:{navLabel:'课程管理',title:'课程管理',subtitle:'管理活跃与归档课程、专属头像以及每门课的学习约定（AGENTS.md）。'},
- daily:{navLabel:'日程与要求',title:'日程与要求',subtitle:'查看、更正或移除从对话与资料中记录的考试、作业与课程要求。'},
- general:{navLabel:'偏好与状态',title:'偏好与状态',subtitle:'配置默认思考强度、界面布局，查看本机服务连接与存储位置。'}
-}
-
 export function SettingsPage({
  courses,activeCourseId,currentSourceId,conversationBusy,loading=false,loadError='',
  initialSection='materials',preset,onPresetChange,presetConfigs,onSavePresetConfigs,onResetPresetConfigs,
  catalogModels,onRefreshModels,status,leftOpen,onToggleLeftOpen,onResetLayout,
  onCreate,onArchive,onOpen,onClose,onChanged,onOpenSource,onOpenConversation,onSourcesDeleted,onSourceRenamed,revision
 }:Props){
+ const {t,collator,courseDisplayName}=useI18n()
  const [section,setSection]=useState<SettingsSection>(initialSection)
  const [selectedCourseId,setSelectedCourseId]=useState<string>(activeCourseId)
  const [info,setInfo]=useState<SettingsInfo|null>(null)
@@ -70,9 +64,9 @@ export function SettingsPage({
    if(b.id===activeCourseId)return 1
    if(a.id==='general')return -1
    if(b.id==='general')return 1
-   return collator.compare(a.name,b.name)
+   return collator.compare(courseDisplayName(a),courseDisplayName(b))
   })
- },[courses,activeCourseId])
+ },[courses,activeCourseId,collator,courseDisplayName])
 
  useEffect(()=>{
   if(activeCourses.length&&!activeCourses.some(c=>c.id===selectedCourseId)){
@@ -109,26 +103,35 @@ export function SettingsPage({
  },[])
 
  const totalActiveFiles=useMemo(()=>activeCourses.reduce((sum,course)=>sum+(course.stats?.fileCount||0),0),[activeCourses])
+ const totalActiveQuestions=useMemo(()=>activeCourses.reduce((sum,course)=>sum+(course.stats?.questionCount||0),0),[activeCourses])
  const hasStats=useMemo(()=>activeCourses.some(course=>Boolean(course.stats)),[activeCourses])
 
  const navItems:Array<{id:SettingsSection;icon:typeof FolderOpen;badge?:number}>=[
   {id:'materials',icon:FolderOpen,badge:hasStats?totalActiveFiles:undefined},
+  {id:'practice',icon:GraduationCap,badge:hasStats?totalActiveQuestions:undefined},
   {id:'courses',icon:BookOpen,badge:activeCourses.length||undefined},
   {id:'daily',icon:CalendarClock},
   {id:'general',icon:SlidersHorizontal}
  ]
 
- const meta=SECTION_META[section]
+ const sectionMeta={
+  materials:{navLabel:t('settings.section.materials.nav'),title:t('settings.section.materials.title'),subtitle:t('settings.section.materials.subtitle')},
+  practice:{navLabel:t('settings.section.practice.nav'),title:t('settings.section.practice.title'),subtitle:t('settings.section.practice.subtitle')},
+  courses:{navLabel:t('settings.section.courses.nav'),title:t('settings.section.courses.title'),subtitle:t('settings.section.courses.subtitle')},
+  daily:{navLabel:t('settings.section.daily.nav'),title:t('settings.section.daily.title'),subtitle:t('settings.section.daily.subtitle')},
+  general:{navLabel:t('settings.section.general.nav'),title:t('settings.section.general.title'),subtitle:t('settings.section.general.subtitle')}
+ }
+ const meta=sectionMeta[section]
 
  return <div className="settings-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose()}}>
   <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="study-settings-title" className="settings-page">
-   <aside className="settings-sidebar" aria-label="设置导航">
+   <aside className="settings-sidebar" aria-label={t('settings.navAria')}>
     <div className="settings-brand">
-     <h1 id="study-settings-title">设置</h1>
-     <p>工作区与偏好</p>
+     <h1 id="study-settings-title">{t('settings.title')}</h1>
+     <p>{t('settings.subtitle')}</p>
     </div>
 
-    <nav className="settings-nav" role="tablist" aria-label="设置分类">
+    <nav className="settings-nav" role="tablist" aria-label={t('settings.tabsAria')}>
      {navItems.map(item=>{
       const Icon=item.icon,active=section===item.id
       return <button
@@ -140,7 +143,7 @@ export function SettingsPage({
        onClick={()=>setSection(item.id)}
       >
        <Icon size={16}/>
-       <span>{SECTION_META[item.id].navLabel}</span>
+       <span>{sectionMeta[item.id].navLabel}</span>
        {typeof item.badge==='number'&&<small className="sm-tabular">{item.badge}</small>}
       </button>
      })}
@@ -149,9 +152,9 @@ export function SettingsPage({
     <div className="settings-sidebar-footer">
      <div className="settings-conn-summary">
       <span className={'settings-conn-dot '+(status?.authenticated?'is-online':'')} aria-hidden="true"/>
-      <span>{status?.authenticated?'Codex 已连接':'等待连接'}</span>
+      <span>{status?.authenticated?t('app.codexConnected'):t('app.codexWaiting')}</span>
      </div>
-     <span className="settings-version sm-tabular">v{info?.version||'0.20.22'}</span>
+     <span className="settings-version sm-tabular">v{info?.version||'0.21.0'}</span>
     </div>
    </aside>
 
@@ -161,7 +164,7 @@ export function SettingsPage({
       <h2>{meta.title}</h2>
       <p>{meta.subtitle}</p>
      </div>
-     <button className="settings-close" type="button" aria-label="关闭设置" title="关闭设置 (Esc)" onClick={onClose}>
+     <button className="settings-close" type="button" aria-label={t('settings.close')} title={t('settings.closeTitle')} onClick={onClose}>
       <X size={18}/>
      </button>
     </header>
@@ -181,6 +184,15 @@ export function SettingsPage({
       onSourceRenamed={onSourceRenamed}
      />}
 
+     {section==='practice'&&<SettingsPractice
+      courses={activeCourses}
+      selectedCourseId={selectedCourseId}
+      onSelectCourse={setSelectedCourseId}
+      activeCourseId={activeCourseId}
+      revision={revision}
+      onChanged={onChanged}
+     />}
+
      {section==='courses'&&<SettingsCourses
       courses={courses}
       activeCourseId={activeCourseId}
@@ -195,7 +207,7 @@ export function SettingsPage({
      />}
 
      {section==='daily'&&<div className="sd-root">
-      <div className="sm-course-strip" role="tablist" aria-label="选择课程查看日常管理">
+      <div className="sm-course-strip" role="tablist" aria-label={t('settings.selectCourseForDaily')}>
        {activeCourses.map(course=>{
         const selected=course.id===selectedCourseId
         return <button
@@ -207,8 +219,8 @@ export function SettingsPage({
          onClick={()=>setSelectedCourseId(course.id)}
         >
          <CourseAvatar courseId={course.id} size={18} interactive={false}/>
-         <span>{course.name}</span>
-         {course.id===activeCourseId&&<em className="sm-pill-dot" title="当前所在课程"/>}
+         <span>{courseDisplayName(course)}</span>
+         {course.id===activeCourseId&&<em className="sm-pill-dot" title={t('settings.currentCourseDot')}/>}
         </button>
        })}
       </div>
