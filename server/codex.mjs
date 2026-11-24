@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import { chemistryInstructions } from './chemistry-prompt.mjs';
 import { studyInstructions, finalOutputPolicy, analysisInstructions } from './study-prompt.mjs';
@@ -45,6 +46,33 @@ async function prepareHome(){
   try{await fs.symlink(authSource,link)}catch(e){if(e.code!=='EEXIST')throw e;const stat=await fs.lstat(link);if(!stat.isSymbolicLink() || await fs.readlink(link)!==authSource)throw new Error('隔离登录路径已被占用')}
 }
 
+const DEFAULT_CODEX_BIN = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
+export async function resolveCodexCommand(env = process.env) {
+  const explicit = typeof env.STUDY_CODEX_BIN === 'string' ? env.STUDY_CODEX_BIN.trim() : '';
+  if (explicit) return explicit;
+  const home = os.homedir();
+  const pathDirs = typeof env.PATH === 'string' ? env.PATH.split(path.delimiter).filter(Boolean) : [];
+  const candidates = [
+    DEFAULT_CODEX_BIN,
+    '/Applications/Codex.app/Contents/Resources/codex',
+    '/opt/homebrew/bin/codex',
+    '/usr/local/bin/codex',
+    path.join(home, '.local/bin/codex'),
+    path.join(home, '.npm-global/bin/codex'),
+    ...pathDirs.map(dir => path.join(dir, 'codex')),
+  ];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) continue;
+    seen.add(candidate);
+    try {
+      await fs.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  return DEFAULT_CODEX_BIN;
+}
+
 export class CodexBridge extends EventEmitter {
   constructor({now=Date.now}={}){ super(); this.child=null; this.pending=new Map(); this.next=0; this.ready=null; this.isolated=new Map(); this.toolHandler=null; this.now=now; this.generation=0; this.isolationPromise=null; this.catalog=null; this.catalogPromise=null; this.accountPromise=null; }
   start(){
@@ -54,7 +82,7 @@ export class CodexBridge extends EventEmitter {
   async _start(){
     await prepareHome();
     const switches=CLI_FEATURE_ARGS;
-    const codexCommand=process.env.STUDY_CODEX_BIN || '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex';
+    const codexCommand=await resolveCodexCommand();
     const child=spawn(codexCommand,['app-server',...switches],{env:{...process.env,CODEX_HOME:isolatedHome},stdio:['pipe','pipe','pipe']}); this.child=child;
     createInterface({input:child.stdout}).on('line',line=>{if(this.child!==child)return;try{this.receive(JSON.parse(line))}catch{}});
     child.stderr.resume();

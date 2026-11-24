@@ -1,191 +1,476 @@
 # Study Studio
 
-本地优先的 AI 学习工作区：课程资料、持续对话、PDF 阅读与交互练习集中在同一个窗口。
+> **本地优先的 AI 学习工作区** — 将课程资料管理、持续对话辅导、多格式并排阅读、PDF 批注与书签、交互式练习题库和化学/理工科渲染集中在同一个窗口。
+>
+> **A local-first AI study workspace** — bringing course materials, persistent tutoring conversations, multi-format side-by-side reading, PDF annotations & bookmarks, interactive practice, and chemistry/STEM rendering together in one window.
 
-A local-first AI study workspace that brings course materials, persistent conversations, PDF reading, and interactive practice into one window.
+[![Build & Release macOS App](https://github.com/Waylon524/StudyStudio/actions/workflows/build-macos.yml/badge.svg)](https://github.com/Waylon524/StudyStudio/actions/workflows/build-macos.yml)
+[![Latest Release](https://img.shields.io/github/v/release/Waylon524/StudyStudio?label=Release)](https://github.com/Waylon524/StudyStudio/releases)
+[![Platform](https://img.shields.io/badge/macOS-14%2B%20Apple%20Silicon-black)](https://github.com/Waylon524/StudyStudio/releases)
+[![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[中文](#中文) · [English](#english)
+[中文文档](#中文) · [English Documentation](#english) · [下载安装包 / Releases](https://github.com/Waylon524/StudyStudio/releases) · [环境变量 / Configuration](#configuration)
+
+---
 
 ## 中文
 
-### 功能
+### 目录
 
-- **按课程学习**：每门课保留持续会话、资料目录、阅读位置与学习约定；支持在设置中统一管理各课程资料、课件与分类，以及课程归档与恢复。
-- **结合资料讲解与多格式右侧阅读**：并排阅读 PDF、Markdown 与 HTML 资料并支持点击引用直达；Agent 按需读取文字、页面图像、图片和 EPUB 分节，也可在课程资料目录中安全创建或更新自己生成的 Markdown 笔记与离线交互 HTML 页面（不覆盖用户原件或系统文件）。打开文件本身不会自动发送全文内容。用 EmbedPDF 在 PDF 课件上添加文字、直线、矩形和椭圆，Agent 也能在讲解时添加批注；Markdown 阅读器复用对话渲染内核，完整支持 KaTeX、`\ce{}`、化学结构式/反应方程式与折叠目录；HTML 阅读器复用离线沙箱引擎，并支持将对话中的交互画布一键在右侧打开。
-- **交互练习**：判断、选择、填空、简答与闪卡；保存真实作答、提示使用情况和点评。简答支持图片；“继续”会接着上文讲解并参考已保存作答，内部提示不显示在聊天里。
-- **课程日常**：记录考试、截止日期与课程要求，保留来源、条件和更正历史；不自动创建外部日历或提醒。
-- **学科工具**：LaTeX / mhchem、分子结构、反应与电子流图、本地计算与统计、只读 Excel，以及可保存的隔离交互画布。
-- **长对话阅读**：流式显示最终回答，复用历史消息；化学图在自身内容完整后按视口渐进绘制，向上阅读时保持位置。
+- [核心特性](#核心特性)
+- [系统要求与前置依赖](#系统要求与前置依赖)
+- [安装与运行指南](#安装与运行指南)
+  - [方式一：下载预构建 macOS 安装包（推荐）](#方式一下载预构建-macos-安装包推荐)
+  - [方式二：从源码本地运行（浏览器模式 / 开发模式）](#方式二从源码本地运行浏览器模式--开发模式)
+  - [方式三：从源码打包 macOS 原生应用](#方式三从源码打包-macos-原生应用)
+- [可选增强环境配置（Poppler 与化学矢量引擎）](#可选增强环境配置poppler-与化学矢量引擎)
+- [首次启动与常见问题排查](#首次启动与常见问题排查)
+- [数据存储、架构与安全边界](#数据存储架构与安全边界)
+- [测试验证与 GitHub 自动构建](#测试验证与-github-自动构建)
 
-### 环境与依赖
+### 核心特性
 
-主要开发与打包目标是 **Apple Silicon macOS**；原生外壳要求 macOS 14 或更新版本。其他平台未做完整验证。
+- **按课程组织的学习空间**：每门课保留独立的资料目录、持续会话线程、阅读进度、专属向量头像与学习约定（`AGENTS.md`）。支持简体中文 / English 双语界面即时切换，以及课程归档与恢复。
+- **多格式并排阅读与批注系统**：
+  - **PDF 课件阅读器（EmbedPDF + 本地 PDF.js 备用）**：支持全文检索、页面缩略图、框选文字或区域带页码引用提问，以及保留原件的带批注/自定义书签 PDF 导出。用户与 AI 助教均可添加文字、直线、矩形、椭圆标注，并支持 AI 后台一键重构 PDF 书签目录。
+  - **Markdown 阅读器**：复用对话渲染内核，完整支持 KaTeX 公式、`\ce{}` 化学式、矢量化学结构式/方程式与可折叠目录。
+  - **HTML 阅读器与隔离交互画布**：在受限离线沙箱 iframe 中运行；可将对话中的教学动画/交互画布一键在右侧展开、保存至练习区或导出独立 HTML。AI 也可在课程目录中安全创建或更新自己生成的 Markdown 笔记与交互页面（不会覆盖用户原件或系统文件）。
+  - **按需读取，不盲传全文**：打开课件不会自动把整本 PDF 发给模型；AI 按需读取当前页文字与页面图像、图片或 EPUB 章节。
+- **原生交互练习与题库管理**：
+  - 支持 **判断题、选择题（单选/多选）、填空题、简答题（支持上传/粘贴多张图片作答）、闪卡（四档自评）** 五类组件，自动记录真实作答、提示/参考答案使用情况与 AI 点评。
+  - 点击「继续」会结合已保存的真实作答无缝衔接辅导，不向聊天记录暴露内部续写提示词。
+  - 侧边栏学习区与「设置 → 练习与题库」支持按单元/知识点分类、AI 一键智能整理、编辑和删除；题目和交互画布内同样支持渲染化学结构式与方程式。
+- **化学与理工科专业能力**：
+  - 内置 KaTeX 与 `mhchem`（`\ce{...}`，含自由基与质谱碎裂等反应表达）。
+  - 配合可选 RDKit + `codex-organic-chem` 引擎支持分子结构式、有机反应式、电子流弯箭头机理图、**选择性显式氢（按原子拆分特定 H）与指向箭头/标注修饰**，并按视口渐进渲染以保持长对话阅读位置稳定。
+  - 内置本地 Python 科学计算、统计分析与只读 Excel（XLSX / XLSM）读取工具。
+- **课程日常（日程与课程要求）**：自动沉淀考试、作业、截止日期、评分规则等课程要求，保留原文引用、适用条件与更正历史（不自动写入系统外部日历）。
+- **可自定义模型与思考强度**：在「设置（`⌘,`）→ 偏好与状态」中，可从当前 Codex 账号暴露的全部模型和推理强度里，分别为 **Fast / Default / Deep** 三档自由配置模型与思考强度。
 
-基础运行需要 **Node.js 22.13+、npm 和兼容的 Codex CLI**。请先按 [Codex 文档](https://developers.openai.com/codex/cli/)安装并登录，再将 `STUDY_CODEX_BIN` 指向该可执行文件。当前桥接要求 `~/.codex/auth.json` 为已有的普通登录文件，通过符号链接在独立运行目录中复用；不包含登录页面，也不处理仅保存在系统钥匙串中的登录方式。
+### 系统要求与前置依赖
 
-Fast / Default / Deep 三个思考强度档位可在「设置 → 偏好与状态」中从当前 Codex 账号暴露的全部模型及其支持的思考强度里自由配置（默认在 [`shared/model-presets.mjs`](shared/model-presets.mjs) 与 [`server/model-policy.mjs`](server/model-policy.mjs) 中预设为 GPT-6.1 Terra medium / high 与 GPT-6.2 Astra high）。课程头像另需 GPT-6 Astra high。账号必须能访问对应模型与能力；这些名称和 Codex 的实验接口不保证适用于所有账号或 CLI 版本。
+- **桌面原生应用目标平台**：**Apple Silicon macOS（M1 / M2 / M3 / M4，`arm64`）**，要求 **macOS 14 (Sonoma) 或更高版本**。其他系统/架构未做完整验证。
+- **必装前置组件：兼容的 Codex CLI 与登录状态**
+  - Study Studio 通过本机 [Codex CLI](https://developers.openai.com/codex/cli/)（`codex app-server`）连接模型服务。
+  - 请先安装并登录 Codex CLI，确保 `~/.codex/auth.json` 为已存在的**常规登录文件**（应用会在独立运行目录中通过符号链接复用该文件，不修改全局 Codex 配置；应用本身不包含登录界面，也不读取仅保存在系统钥匙串中的登录凭证）。
+  - Fast / Default / Deep 默认在 [`shared/model-presets.mjs`](shared/model-presets.mjs) 与 [`server/model-policy.mjs`](server/model-policy.mjs) 中预设为 GPT-6.1 Terra medium / high 与 GPT-6.2 Astra high，可在设置中改为你当前账号可用的任意模型；课程头像另需 GPT-6 Astra high。具体模型名称和 Codex 实验接口不保证适用于所有账号或 CLI 版本。
 
-| 功能 | 额外环境与限制 |
-| --- | --- |
-| PDF 页面供 Agent 读取 | Poppler 的 `pdfinfo`、`pdftotext`、`pdftoppm`；前端使用随应用打包的 EmbedPDF 阅读器和中文字体，备用阅读器使用本机 PDF.js 资源。 |
-| DOCX / PPTX / EPUB 提取 | Python 3；只读取支持的原生内容，不执行 OCR。PPT / PPTX 需另转为 PDF 才能在阅读器中翻页。 |
-| 化学绘图 | Python 环境中安装 RDKit 和 [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem)，按其说明配置，并设置 `STUDY_CHEM_PYTHON`。这些依赖不由 `npm ci` 安装。 |
-| 本地计算、统计与 XLSX / XLSM 读取 | Python 3；分析模块使用标准库。Excel 宏与公式不执行，缓存值可能缺失或过期；旧 XLS 需转换。 |
-| 图片作答与部分 EPUB 图片预览 | 使用 macOS 的 `sips` 解码与转换。 |
+| 组件 | 必要性 | 用途与说明 | 安装方式 / 默认路径 |
+| --- | --- | --- | --- |
+| **Codex CLI** | **必装** | 模型对话、工具调用、资料分类、题库整理与书签生成 | 见 [Codex 文档](https://developers.openai.com/codex/cli/)（`npm i -g @openai/codex` / `brew install --cask codex` / ChatGPT 桌面端内置）；登录后生成 `~/.codex/auth.json` |
+| **Node.js 22.13+ & npm** | 仅源码运行/打包需要 | 运行本地服务与构建前端（**预构建 `.app` 已内置独立 arm64 Node，无需另装**） | [nodejs.org](https://nodejs.org/) 或 `brew install node` |
+| **Poppler** (`pdfinfo` / `pdftotext` / `pdftoppm`) | **强烈推荐** | 让 AI 读取 PDF 页面文字与渲染图像（前端 PDF 阅读本身已内置 EmbedPDF + 思源黑体与本地 PDF.js，不依赖 Poppler） | `brew install poppler`（默认查找 `/opt/homebrew/bin`，可用 `STUDY_POPPLER_DIR` 覆盖） |
+| **Python 3** | 推荐 | DOCX / PPTX / EPUB 原生内容提取（无 OCR）、本地计算统计与只读 XLSX/XLSM 解析 | macOS `/usr/bin/python3`（若未安装 Command Line Tools，运行 `xcode-select --install`） |
+| **RDKit + `codex-organic-chem`** | 可选 | 矢量化学结构式、反应式、电子流机理图、选择性显式氢与指向标注 | 独立 Python 虚拟环境，默认 `~/.local/share/codex-organic-chem/.venv/bin/python`（可用 `STUDY_CHEM_PYTHON` 覆盖） |
+| **macOS `sips`** | 系统自带 | 简答题图片上传预处理与部分 EPUB 图片预览 | macOS 内置，无需安装 |
 
-### 开发运行
+### 安装与运行指南
 
-在仓库根目录运行：
+#### 方式一：下载预构建 macOS 安装包（推荐）
+
+适用于 **Apple Silicon Mac（macOS 14+）**，无需配置 Node.js 或编译 Swift。
+
+1. **先安装并登录 Codex CLI**（若尚未安装）：
+   ```sh
+   # 方式 A：通过 Homebrew 安装
+   brew install --cask codex
+   # 或 方式 B：通过 npm 安装
+   # npm install -g @openai/codex
+
+   # 完成登录并确认生成常规登录文件 ~/.codex/auth.json
+   codex login
+   ls -l ~/.codex/auth.json
+   ```
+   > 应用启动时会自动按顺序查找 Codex 可执行文件：`STUDY_CODEX_BIN` → ChatGPT.app 内置 CLI → Codex.app 内置 CLI → `/opt/homebrew/bin/codex` → `/usr/local/bin/codex` → `~/.local/bin/codex` → `PATH`。
+2. **（推荐）安装 Poppler**，使 AI 助教可以查看 PDF 课件文字与页面图像：
+   ```sh
+   brew install poppler
+   ```
+3. **下载安装包**：
+   - 前往 [GitHub Releases](https://github.com/Waylon524/StudyStudio/releases) 下载最新版本的 **`Study-Studio-vX.Y.Z-macos-arm64.dmg`**（或 `.zip`）。
+   - 如需下载最新主分支或手动触发的 CI 构建产物，也可在 [GitHub Actions → Build & Release macOS App](https://github.com/Waylon524/StudyStudio/actions/workflows/build-macos.yml) 的对应构建页底部下载 Artifact。
+   - （可选）校验文件完整性：
+     ```sh
+     shasum -a 256 -c SHA256SUMS.txt
+     ```
+4. **安装到应用程序目录**：
+   - 双击 `.dmg`，将 **`Study Studio.app`** 拖入 **`Applications`** 文件夹（若下载 `.zip`，解压后移动至 `/Applications/Study Studio.app`）。
+5. **首次打开解除 macOS 隔离属性（重要）**：
+   - 当前发布的安装包采用 **ad-hoc 本地签名**，未经过 Apple Developer ID 公证。通过浏览器下载后 macOS 会附加 `com.apple.quarantine` 隔离属性，直接双击可能提示 **“Study Studio 已损坏，无法打开”** 或 **“无法验证开发者”**。
+   - 打开「终端」执行以下命令移除隔离属性后再启动：
+     ```sh
+     xattr -dr com.apple.quarantine "/Applications/Study Studio.app"
+     open "/Applications/Study Studio.app"
+     ```
+   - 也可在尝试打开后，前往 **系统设置 → 隐私与安全性** 底部点击 **「仍要打开」**。
+6. **在应用内确认模型配置**：
+   - 打开后按 `⌘,` 进入 **设置 → 偏好与状态**，确认 Codex 状态为「已连接」；若默认预设模型在当前账号中不可用，点击 **「刷新模型」** 并为 Fast / Default / Deep 选择可用模型即可开始学习。
+
+> **升级提示**：覆盖安装新版前，请先确认没有正在生成的回复或未发送草稿，按 `⌘Q` 完全退出 Study Studio，再将新版 `Study Studio.app` 拖入 `/Applications` 替换。你的课程文件（`~/Documents/StudyStudio/`）与应用数据（`~/Library/Application Support/Study Studio/data/`）独立存放，不会被清除。
+
+---
+
+#### 方式二：从源码本地运行（浏览器模式 / 开发模式）
+
+适合想在浏览器中运行、二次开发或调试前后端的用户。需先安装 **Node.js 22.13+**、**npm** 与已登录的 **Codex CLI**。
 
 ```sh
+git clone https://github.com/Waylon524/StudyStudio.git
+cd StudyStudio
 npm ci
-export STUDY_CODEX_BIN="$(command -v codex)"
+
+# 如 codex 不在默认自动发现路径中，可显式指定：
+# export STUDY_CODEX_BIN="$(command -v codex)"
+
 npm run build
 npm start
 ```
 
-打开 [http://127.0.0.1:4317](http://127.0.0.1:4317)。`STUDY_CODEX_BIN` 必须指向支持项目所需 app-server 接口的有效程序；安装依赖并不保证 Codex 兼容性或模型访问权限。
+打开浏览器访问 [http://127.0.0.1:4317](http://127.0.0.1:4317)。
 
-前端开发时保留后端进程，再在另一个终端运行：
+**前端热重载开发模式**（保持上方 `npm start` 后端进程运行，在第二个终端执行）：
 
 ```sh
 npm run dev:ui
 ```
 
-开发页面为 [http://127.0.0.1:5173](http://127.0.0.1:5173)，`/api` 默认代理到端口 4317。更改后端端口时，也需调整 [`vite.config.ts`](vite.config.ts) 中的代理。
+访问 [http://127.0.0.1:5173](http://127.0.0.1:5173)（`/api` 默认代理到 `127.0.0.1:4317`；若通过 `STUDY_PORT` 修改后端端口，请同步调整 [`vite.config.ts`](vite.config.ts)）。
 
-`npm run build` 和 `npm run dev:ui` 会先从已安装的 `pdfjs-dist` 生成 `public/pdfjs/` 资源及其许可证；也可手动运行 `node scripts/prepare-pdf-assets.mjs`。这些生成文件无需提交。
+> `npm run build` 和 `npm run dev:ui` 会自动执行 `node scripts/prepare-pdf-assets.mjs`，从 `pdfjs-dist` 提取 `public/pdfjs/` 资源与对应许可证（这些生成文件已由 `.gitignore` 排除，无需提交）。
 
-环境变量见下方 [Configuration](#configuration)。仓库中有按功能划分的 `scripts/check-*.mjs` 和 Python 检查脚本；部分检查需要对应可选环境或真实 Codex 登录，请按变更范围选择。
+---
 
-### macOS 打包
+#### 方式三：从源码打包 macOS 原生应用
 
-需要 Xcode Command Line Tools、Swift、Python 3，以及只依赖 macOS 系统库的独立 arm64 Node 二进制。打包器优先采用 `STUDY_NODE_BINARY`，否则尝试已安装 Study Studio 的内置 Node，再查找 `PATH` 中的 Node。若所用 Node 链接了 Homebrew 等外部动态库，校验会拒绝；可显式指定合适的独立二进制：
+适合在本机自行编译、打包或更新 `/Applications/Study Studio.app`。
 
-```sh
-export STUDY_NODE_BINARY=/path/to/standalone-arm64-node
-./script/build_and_run.sh --build-only
-```
+1. **打包环境要求**：
+   - Apple Silicon Mac（`arm64`）、Xcode Command Line Tools（`xcode-select --install`）、Swift、Python 3。
+   - **独立 arm64 Node.js 二进制**：打包脚本 [`script/package_macos.py`](script/package_macos.py) 会用 `otool -L` 严格校验内置 Node 仅链接 macOS 系统库（`/System/Library/` 和 `/usr/lib/`）。通过 Homebrew 安装的 Node 若动态链接了 `/opt/homebrew/opt/...` 会被拒绝；请从 [nodejs.org](https://nodejs.org/) 下载官方 `macOS (arm64) .tar.gz` 压缩包，将 `STUDY_NODE_BINARY` 指向解压出的 `bin/node`（若本机已安装过 Study Studio，打包器也会自动复用其内置的合法 Node）。
+2. **仅构建 `.app` 包（不替换本机已安装应用）**：
+   ```sh
+   npm ci
+   export STUDY_NODE_BINARY=/path/to/node-v24.x.x-darwin-arm64/bin/node
+   ./script/build_and_run.sh --build-only
+   ```
+   构建产物位于 `build/macos/Study Studio.app`。
+3. **构建并安全替换 `/Applications/Study Studio.app`**：
+   - 请先保存未发送草稿并完全退出正在运行的 Study Studio（安装器会拒绝在运行中覆盖）。
+   ```sh
+   ./script/build_and_run.sh
+   ```
+   该脚本会编译前端与原生外壳、校验签名与包结构、原子替换 `/Applications/Study Studio.app`、启动并验证新实例就绪后清理构建缓存；若启动验证失败会自动回滚旧版本。
+4. **安装已构建好的 `.app` 并清理缓存**：
+   ```sh
+   /usr/bin/python3 script/install_macos.py "build/macos/Study Studio.app" --clean-builds
+   ```
 
-产物为 `build/macos/Study Studio.app`。去掉 `--build-only` 会构建、替换 `/Applications/Study Studio.app` 并启动核验；更新前应保存草稿并退出正在运行的 App。安装器会校验包与签名，在失败时恢复旧应用。
+### 可选增强环境配置（Poppler 与化学矢量引擎）
 
-包内包含原生外壳、Node、前端、服务端和生产 npm 依赖，**不包含 Codex CLI、登录信息、Poppler 或化学 Python 环境**。它们仍须在运行机器上配置。当前脚本生成本机 ad-hoc 签名包，未提供 Developer ID 公证或通用安装发行流程。
+安装包与 `npm ci` **不包含** Poppler 和化学 Python 环境，按需配置后重启应用即可生效：
 
-### 架构、数据与边界
+1. **PDF 页面读取（Poppler）**：
+   ```sh
+   brew install poppler
+   # 验证工具就绪
+   which pdfinfo pdftotext pdftoppm
+   ```
+   若 Poppler 安装在非 `/opt/homebrew/bin` 目录，请在启动前设置 `STUDY_POPPLER_DIR`。
 
-- [`src/`](src/)：React / TypeScript 界面、EmbedPDF 阅读器与内置教学组件。
-- [`server/`](server/)：绑定 `127.0.0.1` 的 Node 服务；通过 [Codex app-server](https://developers.openai.com/codex/app-server) 提供课程工具，按需调用本地 Python / Poppler。
-- [`shared/`](shared/)：数据校验、Markdown 扩展、流式状态与绘图队列。
-- [`native/`](native/) / [`script/`](script/)：AppKit / WebKit 外壳及打包、安装脚本。
+2. **矢量化学结构式 / 反应式 / 机理图渲染（可选）**：
+   参考 [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem) 的安装说明，将其与 RDKit 安装到默认虚拟环境路径 `~/.local/share/codex-organic-chem/.venv`：
+   ```sh
+   # 示例：创建独立虚拟环境并安装 RDKit 与 codex-organic-chem
+   python3 -m venv ~/.local/share/codex-organic-chem/.venv
+   ~/.local/share/codex-organic-chem/.venv/bin/pip install --upgrade pip rdkit
+   # 随后按 codex-organic-chem 仓库说明安装该包到同一虚拟环境
+   ```
+   Study Studio 默认自动查找 `~/.local/share/codex-organic-chem/.venv/bin/python`；若放在其他路径，可设置环境变量 `STUDY_CHEM_PYTHON` 指向对应的 Python 解释器。
 
-课程文件默认位于 `~/Documents/StudyStudio/`，课程状态保存在各课程的 `.study-studio/` 中。开发服务数据默认为仓库内 `.data/`；原生 App 使用 `~/Library/Application Support/Study Studio/data/`。这些目录可能包含聊天与登录引用，不属于公开源码。仓库不附带个人课程、教材、聊天或登录数据。
+### 首次启动与常见问题排查
 
-“本地优先”不等于离线模型：提问、实际读取的资料、作答和约定会发送到 Codex 使用的模型服务。资料上传后的后台分类也会发送有限文字及必要图片，头像生成会发送课程名称。PDF 显示、资料存储与本地渲染留在机器上。应用复用已有登录，不改全局 Codex 配置。
+| 现象 | 原因与解决方法 |
+| --- | --- |
+| 打开 `.app` 提示「已损坏，无法打开」或「无法验证开发者」 | 安装包为 ad-hoc 签名，执行 `xattr -dr com.apple.quarantine "/Applications/Study Studio.app"` 后重新打开。 |
+| 界面显示「Codex 启动失败」或「未找到可复用的 Codex 登录文件」 | 1. 确认已安装 Codex CLI 且运行 `codex login` 生成常规文件 `~/.codex/auth.json`。<br>2. 若 `codex` 安装在 nvm / fnm / Volta 等非标准路径，可建立软链到 `/opt/homebrew/bin/codex`，或在终端运行 `STUDY_CODEX_BIN="$(command -v codex)" open "/Applications/Study Studio.app"`。<br>3. 查看本机后端日志排查细节：`tail -n 100 ~/Library/Application\ Support/Study\ Studio/server.log`。 |
+| 提示「当前账号暂无可用模型」或「某档位配置的模型暂不可用」 | 打开 **设置（`⌘,`）→ 偏好与状态**，点击 **「刷新模型」**，为 Fast / Default / Deep 切换为当前账号可用的模型与思考强度。 |
+| AI 表示无法读取 PDF 页面内容 | 未安装 Poppler 或路径不对：执行 `brew install poppler`，确认 `/opt/homebrew/bin/pdftoppm` 存在。 |
+| 化学结构式卡片提示绘图失败 | 未配置化学引擎：确认 `~/.local/share/codex-organic-chem/.venv/bin/python` 已安装 RDKit 与 `codex-organic-chem`，或正确设置了 `STUDY_CHEM_PYTHON`。 |
+| 启动提示「另一个学习平台正在运行」或端口 `4317` 占用 | 先退出正在运行的 Study Studio 或旧的 `npm start` 进程；浏览器开发模式可通过 `STUDY_PORT=4318 npm start` 更换端口。 |
 
-Agent 的文件工具限定在当前课程目录；独立 Codex 进程关闭任意命令、原生直接改文件工具及外部插件，仅保留应用提供的受限课程工具（含在资料目录内安全创建学习文档，禁止修改系统文件或覆盖用户原件）与公开网页搜索。交互画布与 HTML 阅读器均在限制网络和主应用访问的独立沙箱 iframe 中运行。
+### 数据存储、架构与安全边界
 
-模型讲解、题目评分与生成图示仍可能出错。化学输入通过排版和电子记账校验，不等于真实机理或实验已验证。单个资料文件上限为 100 MB；有界提取和模型上下文另有限制，整本 PDF / PPTX 的一次文字提取最多前 100 页及 100,000 字符。没有 OCR、语音转写、外部 LMS 登录或云同步功能。
+#### 代码目录结构
+
+- [`src/`](src/)：React / TypeScript 界面、EmbedPDF 阅读器、Markdown/HTML 阅读器与内置教学组件。
+- [`server/`](server/)：仅绑定 `127.0.0.1` 的 Node 服务；通过 [Codex app-server](https://developers.openai.com/codex/app-server) 提供受限课程工具，按需调用本地 Python / Poppler / 化学渲染脚本。
+- [`shared/`](shared/)：数据校验、Markdown 扩展、化学方程式解析、流式状态与渐进绘图队列。
+- [`native/`](native/) / [`script/`](script/)：macOS AppKit / WKWebView 原生外壳及打包、原子替换安装脚本。
+- [`scripts/`](scripts/)：资源准备脚本（`prepare-pdf-assets.mjs`）与分模块验证检查脚本（`check-*.mjs`）。
+- [`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml)：Apple Silicon macOS 自动化验证、打包与 GitHub Release 发布工作流。
+
+#### 本地数据存储位置
+
+| 数据类型 | 浏览器开发模式默认路径 | macOS 原生 App 路径 |
+| --- | --- | --- |
+| 课程资料与学习记录 | `~/Documents/StudyStudio/`（每门课状态位于 `<课程>/.study-studio/`） | `~/Documents/StudyStudio/`（每门课状态位于 `<课程>/.study-studio/`） |
+| 会话索引、设置与隔离 Codex 目录 | 仓库内 `.data/`（可通过 `STUDY_DATA_ROOT` 覆盖） | `~/Library/Application Support/Study Studio/data/` |
+| 原生 App 后端运行日志 | 终端标准输出 | `~/Library/Application Support/Study Studio/server.log` |
+
+> 以上数据目录包含你的个人资料、对话与登录符号链接，已被 `.gitignore` 排除，不包含在公开源码仓库或发布安装包中。
+
+#### 隐私、安全与能力边界
+
+- **本地优先 ≠ 离线模型**：提问内容、AI 实际读取的资料片段/页面图像、作答提交与学习约定会发送到 Codex 所连接的模型服务；上传资料后的后台自动分类会发送有限文字与必要图像；生成课程头像会发送课程名称。PDF 渲染、原件存储与本地化学/计算渲染留在你的设备上。
+- **工具隔离与沙箱**：Agent 的文件工具严格限制在当前课程目录内；独立的 Codex 运行实例关闭任意命令行执行、原生直接改文件工具与外部插件，仅保留应用提供的受限 `study_*` 课程工具（含安全创建学习文档，禁止覆盖用户原件或系统文件）与公开联网搜索。交互画布与 HTML 阅读器均运行在隔离沙箱 iframe 中。
+- **能力限制**：模型讲解、自动评分与化学绘图仍可能出错，化学排版与电子记账校验不等于实验验证。单文件上传上限为 **100 MB**；整本 PDF / PPTX 一次文字提取上限为前 **100 页 / 100,000 字符**。暂不提供 OCR、语音转写、外部 LMS 登录或云同步。
+
+### 测试验证与 GitHub 自动构建
+
+- **本地检查脚本**：仓库在 [`scripts/`](scripts/) 中提供了覆盖 i18n、模型策略、Markdown、画布、教学组件、练习管理、资料管理、PDF 目录、化学渲染与运行隔离的 `check-*.mjs` 验证脚本（部分脚本需要 Poppler、化学 Python 环境或真实 Codex 登录，请按改动范围运行）。
+- **GitHub Actions 自动构建与发布**：
+  - 每次推送符合 `v*` 格式的标签（如 `git tag v0.21.0 && git push origin v0.21.0`，且标签号与 `package.json` 及 `native/Info.plist` 一致）时，[Build & Release macOS App](.github/workflows/build-macos.yml) 会在 Apple Silicon (`macos-15`) Runner 上自动完成前端构建、离线测试、`Study Studio.app` 签名打包，并生成 `.dmg`、`.zip` 与 `SHA256SUMS.txt` 发布到 **GitHub Releases**。
+  - 也可在 GitHub 仓库的 **Actions → Build & Release macOS App → Run workflow** 手动触发构建并下载产物（勾选 `publish_release` 还可直接发布/更新对应版本的 Release）。
+
+---
 
 ## English
 
-### Features
+### Table of Contents
 
-- **Course workspaces:** persistent conversations, materials, reading positions, and learning preferences, with unified material/courseware management in Settings and course archiving/restoration.
-- **Material-aware tutoring & multi-format side reader:** read PDF, Markdown, and HTML files side by side with the conversation and follow citations directly. The agent reads text, page images, pictures, and EPUB sections on demand, and can create or update its own Markdown notes and self-contained offline HTML pages inside course material folders (never overwriting user originals or system files). EmbedPDF lets you and the agent add text, lines, rectangles, and ellipses to PDF slides, search full text, quote selections/regions in chat, and export annotated copies. The Markdown reader reuses the chat renderer for KaTeX, `\ce{}`, native vector chemical structures/equations, and a collapsible outline; the HTML reader reuses the sandboxed canvas iframe and lets you open chat canvases directly in the right pane.
-- **Interactive practice:** true/false, multiple choice, fill-in-the-blank, short answers, and flashcards. Actual submissions, hint use, and feedback are saved. Short answers accept images; Continue resumes the lesson using saved submissions without showing its internal prompt.
-- **Course planning:** exams, deadlines, and course requirements retain sources, conditions, and revision history. No external calendar events or reminders are created automatically.
-- **Subject tools:** LaTeX / mhchem, molecular structures, reactions, electron-flow diagrams, local calculations and statistics, read-only Excel, and saved sandboxed interactive canvases.
-- **Long conversations:** final answers stream into view, historical messages are reused, and complete chemical blocks render progressively near the viewport while preserving the learner’s reading position.
+- [Key Features](#key-features)
+- [System Requirements & Prerequisites](#system-requirements--prerequisites)
+- [Installation & Running](#installation--running)
+  - [Option 1: Download Pre-built macOS App (Recommended)](#option-1-download-pre-built-macos-app-recommended)
+  - [Option 2: Run from Source (Browser / Development Mode)](#option-2-run-from-source-browser--development-mode)
+  - [Option 3: Build & Install the Native macOS App from Source](#option-3-build--install-the-native-macos-app-from-source)
+- [Optional Tools (Poppler & Chemical Vector Engine)](#optional-tools-poppler--chemical-vector-engine)
+- [First Launch & Troubleshooting](#first-launch--troubleshooting)
+- [Architecture, Data Storage & Boundaries](#architecture-data-storage--boundaries)
+- [Verification & GitHub Actions Releases](#verification--github-actions-releases)
 
-### Requirements and optional tools
+### Key Features
 
-The primary development and packaging target is **Apple Silicon macOS**. The native shell requires macOS 14 or later. Other platforms have not been fully validated.
+- **Course-centric workspaces:** Each course keeps its own material directory, persistent conversation thread, reading position, custom vector avatar, and course instructions (`AGENTS.md`). Supports instant bilingual UI switching (Simplified Chinese / English) and course archiving/restoration.
+- **Multi-format side-by-side reader & annotations:**
+  - **PDF courseware reader (EmbedPDF + local PDF.js fallback):** Full-text search, page thumbnails, quoting selected text or regions with page numbers into chat, and exporting annotated copies with custom bookmarks without modifying originals. Both the learner and AI tutor can add text, line, rectangle, and ellipse annotations, plus background AI PDF bookmark regeneration.
+  - **Markdown reader:** Shares the chat rendering engine with full KaTeX, `\ce{}`, native vector chemical structures/equations, and a collapsible document outline.
+  - **HTML reader & sandboxed interactive canvases:** Runs in an isolated offline sandboxed iframe; chat canvases can be opened side-by-side, saved to the practice area, or downloaded as standalone HTML. The agent can also safely author/update its own Markdown study notes and interactive HTML pages inside the course workspace (never overwriting user originals or system files).
+  - **On-demand material access:** Opening a file never dumps the entire document into the prompt; the agent inspects text, rendered PDF pages, images, or EPUB sections only when needed.
+- **Native interactive practice & question bank:**
+  - Supports **True/False, Multiple Choice (single/multi), Fill-in-the-Blank, Short Answer (with multi-image answer uploads/paste), and Flashcards (4-level self-rating)**. Saves actual submissions, hint/reveal usage, and tutor feedback.
+  - Clicking **Continue** resumes tutoring using saved submissions without exposing internal continuation prompts in the chat transcript.
+  - The Learning sidebar and **Settings → Practice & Questions** provide unit/knowledge-point categorization, AI one-click organization, editing, and deletion. Chemical structures and equations also render directly inside questions and interactive canvases.
+- **Chemistry & STEM tooling:**
+  - Built-in KaTeX and `mhchem` (`\ce{...}`, including radical / mass-spec fragmentation formulas).
+  - With the optional RDKit + `codex-organic-chem` engine, renders molecular structures, organic reactions, curved-arrow mechanisms, **selective explicit hydrogens, and pointer-arrow/label annotations** progressively near the viewport without jumping your reading position.
+  - Local Python math, statistics, and read-only Excel (XLSX / XLSM) analysis tools.
+- **Course schedule & requirements:** Tracks exams, assignments, deadlines, and grading rules with original source quotes, conditions, and revision history (no automatic external calendar writes).
+- **Flexible model & reasoning presets:** Configure **Fast / Default / Deep** in **Settings (`⌘,`) → General** using any models and reasoning efforts exposed by your Codex account.
 
-Basic operation requires **Node.js 22.13+, npm, and a compatible Codex CLI**. Follow the [Codex documentation](https://developers.openai.com/codex/cli/) to install and sign in, then point `STUDY_CODEX_BIN` to the executable. The current bridge requires an existing regular `~/.codex/auth.json` file and reuses it through a symbolic link in its isolated runtime directory. It has no built-in sign-in screen or support for credentials stored exclusively in the system keychain.
+### System Requirements & Prerequisites
 
-Fast / Default / Deep thinking presets can be configured in Settings from all models and reasoning efforts exposed by your Codex account (defaulting in [`shared/model-presets.mjs`](shared/model-presets.mjs) and [`server/model-policy.mjs`](server/model-policy.mjs) to GPT-6.1 Terra medium / high and GPT-6.2 Astra high). Course avatar generation additionally requires GPT-6 Astra high. Your account must expose the corresponding models and capabilities; these names and Codex’s experimental interfaces are not guaranteed to work with every account or CLI version.
+- **Native macOS app target:** **Apple Silicon macOS (M1 / M2 / M3 / M4, `arm64`)**, requiring **macOS 14 (Sonoma) or later**. Other platforms/architectures have not been fully validated.
+- **Required prerequisite: Compatible Codex CLI & authentication**
+  - Study Studio connects to models through a local [Codex CLI](https://developers.openai.com/codex/cli/) (`codex app-server`).
+  - Install and sign in to Codex CLI first so that `~/.codex/auth.json` exists as a **regular file**. Study Studio reuses it via a symlink inside an isolated runtime directory without modifying your global Codex configuration. There is no built-in login screen, and credentials stored exclusively in the system keychain are not supported.
+  - Fast / Default / Deep default in [`shared/model-presets.mjs`](shared/model-presets.mjs) and [`server/model-policy.mjs`](server/model-policy.mjs) to GPT-6.1 Terra medium / high and GPT-6.2 Astra high, and can be remapped in Settings to any model available on your account. Course avatar generation additionally uses GPT-6 Astra high. Model names and Codex experimental interfaces are not guaranteed across every account or CLI release.
 
-| Feature | Additional requirements and limits |
-| --- | --- |
-| Agent access to PDF pages | Poppler: `pdfinfo`, `pdftotext`, and `pdftoppm`. The frontend bundles EmbedPDF and a Chinese font. The fallback reader uses local PDF.js assets. |
-| DOCX / PPTX / EPUB extraction | Python 3; supported native content only, without OCR. Convert PPT / PPTX to PDF separately for page-by-page reading. |
-| Chemical rendering | A Python environment with RDKit and [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem). Follow its setup instructions and set `STUDY_CHEM_PYTHON`; `npm ci` does not install these tools. |
-| Calculations, statistics, and XLSX / XLSM reading | Python 3; the analysis modules use its standard library. Macros and formulas are not executed; cached values may be missing or stale. Convert legacy XLS files first. |
-| Image answers and some EPUB previews | macOS `sips` for image decoding and conversion. |
+| Component | Requirement | Purpose & Notes | Setup / Default Path |
+| --- | --- | --- | --- |
+| **Codex CLI** | **Required** | Chat, tool calling, import classification, practice organization, and PDF bookmark generation | Follow [Codex CLI docs](https://developers.openai.com/codex/cli/) (`npm i -g @openai/codex` / `brew install --cask codex` / ChatGPT desktop bundle); run `codex login` to create `~/.codex/auth.json` |
+| **Node.js 22.13+ & npm** | Source / Dev / Packaging only | Runs the local server and builds the frontend (**not needed for the pre-built `.app`**, which bundles a standalone arm64 Node runtime) | [nodejs.org](https://nodejs.org/) or `brew install node` |
+| **Poppler** (`pdfinfo`, `pdftotext`, `pdftoppm`) | **Strongly recommended** | Enables AI agent reading of PDF text and page images (viewing PDFs in the UI uses bundled EmbedPDF + Noto Sans SC and local PDF.js assets, and works without Poppler) | `brew install poppler` (defaults to `/opt/homebrew/bin`; override with `STUDY_POPPLER_DIR`) |
+| **Python 3** | Recommended | Native DOCX / PPTX / EPUB extraction (no OCR), local calculations/statistics, and read-only XLSX / XLSM reading | macOS `/usr/bin/python3` (install Xcode Command Line Tools via `xcode-select --install` if prompted) |
+| **RDKit + `codex-organic-chem`** | Optional | Native vector chemistry rendering: structures, reactions, mechanisms, selective explicit H, and annotations | Separate Python venv at `~/.local/share/codex-organic-chem/.venv/bin/python` (override with `STUDY_CHEM_PYTHON`) |
+| **macOS `sips`** | Built into macOS | Short-answer image decoding/conversion and EPUB image previews | Included with macOS |
 
-### Development
+### Installation & Running
 
-From the repository root:
+#### Option 1: Download Pre-built macOS App (Recommended)
+
+For **Apple Silicon Macs (macOS 14+)** — no local Node.js or Swift build toolchain required.
+
+1. **Install and sign in to Codex CLI** (if you haven't already):
+   ```sh
+   # Option A: Homebrew
+   brew install --cask codex
+   # Or Option B: npm
+   # npm install -g @openai/codex
+
+   # Sign in and verify ~/.codex/auth.json exists as a regular file
+   codex login
+   ls -l ~/.codex/auth.json
+   ```
+   > At startup, Study Studio automatically searches for the Codex executable in this order: `STUDY_CODEX_BIN` → ChatGPT.app bundled CLI → Codex.app bundled CLI → `/opt/homebrew/bin/codex` → `/usr/local/bin/codex` → `~/.local/bin/codex` → `PATH`.
+2. **(Recommended) Install Poppler** so the AI tutor can inspect PDF courseware pages:
+   ```sh
+   brew install poppler
+   ```
+3. **Download the release package:**
+   - Download **`Study-Studio-vX.Y.Z-macos-arm64.dmg`** (or `.zip`) from [GitHub Releases](https://github.com/Waylon524/StudyStudio/releases).
+   - You can also download recent CI build artifacts from [GitHub Actions → Build & Release macOS App](https://github.com/Waylon524/StudyStudio/actions/workflows/build-macos.yml).
+   - *(Optional)* Verify checksums:
+     ```sh
+     shasum -a 256 -c SHA256SUMS.txt
+     ```
+4. **Install into `/Applications`:**
+   - Open the `.dmg` and drag **`Study Studio.app`** into **`Applications`** (or extract the `.zip` and move `Study Studio.app` to `/Applications`).
+5. **Clear macOS quarantine on first launch (Important):**
+   - Release packages are **ad-hoc signed** and not notarized with an Apple Developer ID. macOS attaches `com.apple.quarantine` to browser downloads, which may trigger *"Study Studio is damaged and can't be opened"* or *"unidentified developer"* warnings.
+   - Run this command in Terminal before opening:
+     ```sh
+     xattr -dr com.apple.quarantine "/Applications/Study Studio.app"
+     open "/Applications/Study Studio.app"
+     ```
+   - Alternatively, go to **System Settings → Privacy & Security** and click **Open Anyway**.
+6. **Verify models in Settings:**
+   - Press `⌘,` to open **Settings → General**, confirm Codex shows **Connected**, and click **Refresh Models** if you want to remap Fast / Default / Deep to models available on your account.
+
+> **Upgrading:** Save any unsent drafts and completely quit Study Studio (`⌘Q`) before replacing `/Applications/Study Studio.app`. Your course materials (`~/Documents/StudyStudio/`) and application data (`~/Library/Application Support/Study Studio/data/`) are stored outside the app bundle and remain intact.
+
+---
+
+#### Option 2: Run from Source (Browser / Development Mode)
+
+Requires **Node.js 22.13+**, **npm**, and a signed-in **Codex CLI**.
 
 ```sh
+git clone https://github.com/Waylon524/StudyStudio.git
+cd StudyStudio
 npm ci
-export STUDY_CODEX_BIN="$(command -v codex)"
+
+# Optional if codex is outside the default auto-discovery locations:
+# export STUDY_CODEX_BIN="$(command -v codex)"
+
 npm run build
 npm start
 ```
 
-Open [http://127.0.0.1:4317](http://127.0.0.1:4317). `STUDY_CODEX_BIN` must point to a working executable that supports the required app-server interfaces. Installing dependencies does not establish Codex compatibility or model access.
+Open [http://127.0.0.1:4317](http://127.0.0.1:4317).
 
-For frontend development, keep the backend running and use a second terminal:
+**Frontend HMR development** (keep `npm start` running and launch Vite in a second terminal):
 
 ```sh
 npm run dev:ui
 ```
 
-The development frontend runs at [http://127.0.0.1:5173](http://127.0.0.1:5173). Its `/api` proxy targets port 4317 by default; update [`vite.config.ts`](vite.config.ts) if the backend port changes.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Vite proxies `/api` to port `4317` by default; update [`vite.config.ts`](vite.config.ts) if you change `STUDY_PORT`.
 
-`npm run build` and `npm run dev:ui` first generate `public/pdfjs/` assets and their licenses from the installed `pdfjs-dist`. Run `node scripts/prepare-pdf-assets.mjs` to prepare them manually. Generated assets do not need to be committed.
+> `npm run build` and `npm run dev:ui` automatically run `node scripts/prepare-pdf-assets.mjs` to copy `public/pdfjs/` assets and upstream license files from `pdfjs-dist` (excluded from Git).
 
-See [Configuration](#configuration) below. Feature-specific `scripts/check-*.mjs` and Python checks are included. Some require optional tools or a live Codex login; choose checks appropriate to the change.
+---
 
-### macOS packaging
+#### Option 3: Build & Install the Native macOS App from Source
 
-Building requires Xcode Command Line Tools, Swift, Python 3, and a standalone arm64 Node binary linked only to macOS system libraries. The packager prefers `STUDY_NODE_BINARY`, then the runtime in an installed Study Studio app, then Node on `PATH`. Node builds linked to external libraries, including some Homebrew builds, are rejected. Set a suitable standalone binary explicitly:
+1. **Build prerequisites:**
+   - Apple Silicon Mac (`arm64`), Xcode Command Line Tools (`xcode-select --install`), Swift, Python 3.
+   - A **standalone arm64 Node.js binary** linked only to macOS system libraries (`/System/Library/` and `/usr/lib/`). Download the official `macOS (arm64) .tar.gz` archive from [nodejs.org](https://nodejs.org/) and set `STUDY_NODE_BINARY` to its `bin/node` (Homebrew Node builds linked against external dynamic libraries are rejected by [`script/package_macos.py`](script/package_macos.py); if Study Studio is already installed in `/Applications`, the packager can also reuse its validated bundled Node).
+2. **Build `.app` only (without replacing `/Applications/Study Studio.app`):**
+   ```sh
+   npm ci
+   export STUDY_NODE_BINARY=/path/to/node-v24.x.x-darwin-arm64/bin/node
+   ./script/build_and_run.sh --build-only
+   ```
+   Output bundle: `build/macos/Study Studio.app`.
+3. **Build, atomically replace `/Applications/Study Studio.app`, and verify startup:**
+   - Save drafts and quit any running Study Studio instance first (the installer refuses to overwrite a running app).
+   ```sh
+   ./script/build_and_run.sh
+   ```
+   The installer validates bundle structure and code signatures, swaps in the new app, verifies the fresh instance comes online, cleans build caches, and automatically restores the previous bundle if startup verification fails.
+4. **Install a pre-built `.app` bundle safely:**
+   ```sh
+   /usr/bin/python3 script/install_macos.py "build/macos/Study Studio.app" --clean-builds
+   ```
 
-```sh
-export STUDY_NODE_BINARY=/path/to/standalone-arm64-node
-./script/build_and_run.sh --build-only
-```
+### Optional Tools (Poppler & Chemical Vector Engine)
 
-The output is `build/macos/Study Studio.app`. Without `--build-only`, the script builds, replaces `/Applications/Study Studio.app`, launches it, and verifies the installation. Save drafts and quit the running app before updating. The installer validates the package and signature and restores the previous app if installation fails.
+Neither the packaged `.app` nor `npm ci` bundles Poppler or the chemistry Python environment. Install them as needed and restart Study Studio:
 
-The bundle includes the native shell, Node, frontend, backend, and production npm dependencies. **Codex CLI, authentication, Poppler, and the chemical Python environment are not bundled** and must be configured on the target machine. The current scripts produce a local ad-hoc signed app, not a Developer ID notarized or general-purpose installer release.
+1. **Poppler (for AI PDF page reading):**
+   ```sh
+   brew install poppler
+   which pdfinfo pdftotext pdftoppm
+   ```
+   If installed outside `/opt/homebrew/bin`, set `STUDY_POPPLER_DIR`.
 
-### Architecture, data, and boundaries
+2. **Vector Chemistry Engine (optional, for molecular structures, reactions, mechanisms, and selective-H annotations):**
+   Follow the setup instructions for [`codex-organic-chem`](https://github.com/LaoZhong-Mihari/codex-organic-chem) with RDKit in the default virtual environment `~/.local/share/codex-organic-chem/.venv`:
+   ```sh
+   python3 -m venv ~/.local/share/codex-organic-chem/.venv
+   ~/.local/share/codex-organic-chem/.venv/bin/pip install --upgrade pip rdkit
+   # Then install codex-organic-chem into the same virtualenv per its README
+   ```
+   Study Studio automatically checks `~/.local/share/codex-organic-chem/.venv/bin/python`; set `STUDY_CHEM_PYTHON` to use a different interpreter.
 
-- [`src/`](src/): React / TypeScript interface, EmbedPDF reader, and built-in teaching components.
-- [`server/`](server/): Node service bound to `127.0.0.1`, exposing course tools through [Codex app-server](https://developers.openai.com/codex/app-server) and calling local Python / Poppler when needed.
-- [`shared/`](shared/): validation, Markdown extensions, streaming state, and the rendering queue.
-- [`native/`](native/) / [`script/`](script/): AppKit / WebKit shell, packaging, and installation scripts.
+### First Launch & Troubleshooting
 
-Course files default to `~/Documents/StudyStudio/`, with per-course state under `.study-studio/`. Development service data defaults to `.data/` in the repository; the native app uses `~/Library/Application Support/Study Studio/data/`. These locations may contain conversations and authentication references and are not public source files. Personal course materials, textbooks, chats, and credentials are not included in this repository.
+| Issue | Cause & Fix |
+| --- | --- |
+| *"Study Studio is damaged and can't be opened"* or *"unidentified developer"* | Ad-hoc signed download quarantined by Gatekeeper. Run `xattr -dr com.apple.quarantine "/Applications/Study Studio.app"` and reopen. |
+| *"Codex failed to start"* or missing auth file | 1. Confirm Codex CLI is installed and `codex login` created a regular `~/.codex/auth.json` file.<br>2. If `codex` lives under nvm / fnm / Volta, symlink it to `/opt/homebrew/bin/codex` or launch via `STUDY_CODEX_BIN="$(command -v codex)" open "/Applications/Study Studio.app"`.<br>3. Check logs: `tail -n 100 ~/Library/Application\ Support/Study\ Studio/server.log`. |
+| *"No models available"* or preset unavailable warning | Open **Settings (`⌘,`) → General**, click **Refresh Models**, and assign models supported by your Codex account to Fast / Default / Deep. |
+| Agent cannot read PDF slide pages | Install Poppler (`brew install poppler`) and verify `/opt/homebrew/bin/pdftoppm` exists. |
+| Chemical structure card reports render failure | Verify `~/.local/share/codex-organic-chem/.venv/bin/python` has RDKit and `codex-organic-chem` installed, or set `STUDY_CHEM_PYTHON`. |
+| Port `4317` already in use / another instance running | Quit any existing Study Studio app or `npm start` process. In browser mode, override via `STUDY_PORT=4318 npm start`. |
 
-Local-first does not mean an offline model. Questions, material actually read, submissions, and learning agreements are sent to the model service used by Codex. Background classification after uploads also sends bounded text and necessary images; avatar generation sends the course name. PDF display, file storage, and local rendering remain on the machine. The application reuses existing authentication without changing global Codex configuration.
+### Architecture, Data Storage & Boundaries
 
-The agent’s file tools are restricted to the active course directory. Its isolated Codex process disables arbitrary commands, native direct file-editing tools, and external plugins, while retaining bounded application-provided course tools (including safe material creation without overwriting user originals or system files) and public web search. Both interactive canvases and the HTML reader run in separate sandboxed iframes with network and host-app access restricted.
+#### Repository Layout
 
-Model explanations, grading, and generated diagrams can be wrong. Chemical layout and electron-accounting checks do not validate a real mechanism or experiment. Individual material files are limited to 100 MB; extraction and model context have separate bounds. A whole-document PDF / PPTX text extraction reads at most the first 100 pages and 100,000 characters. OCR, speech transcription, external LMS login, and cloud synchronization are not provided.
+- [`src/`](src/): React / TypeScript frontend, EmbedPDF viewer, Markdown/HTML readers, and native study components.
+- [`server/`](server/): Localhost-only (`127.0.0.1`) Node service exposing bounded `study_*` tools through [Codex app-server](https://developers.openai.com/codex/app-server), invoking local Python / Poppler / chemistry workers on demand.
+- [`shared/`](shared/): Schema validation, Markdown extensions, chemical equation parser, streaming state, and progressive render queue.
+- [`native/`](native/) / [`script/`](script/): macOS AppKit / WKWebView native shell, packaging, and atomic installation scripts.
+- [`scripts/`](scripts/): Asset preparation (`prepare-pdf-assets.mjs`) and module-level checks (`check-*.mjs`).
+- [`.github/workflows/build-macos.yml`](.github/workflows/build-macos.yml): Automated Apple Silicon macOS build, offline test suite, and GitHub Release workflow.
+
+#### Local Data Locations
+
+| Data | Browser / Dev Default | Native macOS App |
+| --- | --- | --- |
+| Course files & learning state | `~/Documents/StudyStudio/` (per-course state in `<course>/.study-studio/`) | `~/Documents/StudyStudio/` (per-course state in `<course>/.study-studio/`) |
+| Chat index, settings & isolated `CODEX_HOME` | `.data/` inside repo (override via `STUDY_DATA_ROOT`) | `~/Library/Application Support/Study Studio/data/` |
+| Native app backend log | Terminal stdout/stderr | `~/Library/Application Support/Study Studio/server.log` |
+
+> Personal materials, conversations, and credentials are gitignored and never included in this repository or release bundles.
+
+#### Privacy, Security & Functional Limits
+
+- **Local-first ≠ offline model:** Questions, material excerpts/page images actually read, submissions, and learning instructions are sent to the model provider configured in Codex. Background import classification sends bounded text and necessary images; course avatar generation sends the course name. PDF display, file storage, and local chemistry/math rendering stay on your machine.
+- **Sandboxed tools & iframes:** File tools are strictly confined to the active course workspace. The isolated Codex process disables arbitrary shell commands, native direct file-editing tools, and external plugins, keeping only bounded `study_*` tools (including safe note/HTML creation without overwriting user originals or system files) and public web search. Interactive canvases and the HTML reader run inside restricted sandboxed iframes.
+- **Limits:** Model explanations, grading, and diagrams can still contain mistakes; chemical layout/electron checks are not experimental validation. Individual uploads are capped at **100 MB**; whole-document PDF / PPTX text extraction reads at most the first **100 pages / 100,000 characters**. OCR, speech transcription, external LMS login, and cloud sync are not provided.
+
+### Verification & GitHub Actions Releases
+
+- **Local checks:** Run targeted `node scripts/check-*.mjs` scripts covering i18n, model policy, Markdown, canvases, teaching UI, practice/material management, PDF outlines, chemistry rendering, and runtime isolation (some checks require Poppler, the chemistry Python venv, or a live Codex login).
+- **Automated GitHub macOS Builds & Releases:**
+  - Pushing any `v*` tag matching `package.json` and `native/Info.plist` (e.g. `git tag v0.21.0 && git push origin v0.21.0`) triggers [Build & Release macOS App](.github/workflows/build-macos.yml) on an Apple Silicon `macos-15` runner, runs offline checks, packages and verifies `Study Studio.app`, builds `.dmg` / `.zip` / `SHA256SUMS.txt`, uploads build artifacts, and publishes a **GitHub Release**.
+  - You can also trigger a build manually anytime via **Actions → Build & Release macOS App → Run workflow** (enable `publish_release` to publish/update the corresponding release).
+
+---
 
 ## Configuration
 
-Set these variables before starting the backend. / 在启动后端前设置环境变量。
+Set these environment variables before starting the backend / 在启动后端前按需设置以下环境变量：
 
-| Variable | Purpose / 用途 |
-| --- | --- |
-| `STUDY_CODEX_BIN` | Codex app-server executable / Codex 可执行文件路径。 |
-| `STUDY_PORT` | Backend port, default `4317` / 后端端口，默认 `4317`。 |
-| `STUDY_WORKSPACE_ROOT` | Course materials root / 课程文件根目录。 |
-| `STUDY_DATA_ROOT` | Conversation index and isolated runtime data / 对话索引和独立运行数据目录。 |
-| `STUDY_POPPLER_DIR` | Directory containing Poppler tools; default `/opt/homebrew/bin` / Poppler 工具目录。 |
-| `STUDY_CHEM_PYTHON` | Python interpreter with the chemical engine / 化学引擎的 Python 解释器。 |
-| `STUDY_EXTRACT_PYTHON` | Document extraction interpreter, default `/usr/bin/python3` / 文档提取解释器。 |
-| `STUDY_ANALYSIS_PYTHON` | Analysis interpreter, default `/usr/bin/python3` / 计算与统计解释器。 |
-| `STUDY_NODE_BINARY` | Standalone arm64 Node binary used when packaging / 打包时使用的独立 arm64 Node。 |
-
-The native shell sets its own service port and data directory. / 原生外壳会设置自己的服务端口和数据目录。
+| Variable | Default / 默认值 | Purpose / 用途 |
+| --- | --- | --- |
+| `STUDY_CODEX_BIN` | Auto-detected (ChatGPT.app → Codex.app → Homebrew/PATH) / 自动探测 | Explicit path to the Codex CLI executable / 显式指定 Codex 可执行文件路径。 |
+| `STUDY_PORT` | `4317` | Local backend port / 后端监听端口（原生外壳固定使用独立端口管理）。 |
+| `STUDY_WORKSPACE_ROOT` | `~/Documents/StudyStudio` | Course materials root directory / 课程文件根目录。 |
+| `STUDY_DATA_ROOT` | `.data/` (dev) / `~/Library/Application Support/Study Studio/data/` (app) | Chat index, settings, and isolated runtime data / 对话索引、设置与独立运行数据目录。 |
+| `STUDY_POPPLER_DIR` | `/opt/homebrew/bin` | Directory containing `pdfinfo`, `pdftotext`, `pdftoppm` / Poppler 工具所在目录。 |
+| `STUDY_CHEM_PYTHON` | `~/.local/share/codex-organic-chem/.venv/bin/python` | Python interpreter with RDKit + `codex-organic-chem` / 化学矢量引擎 Python 解释器。 |
+| `STUDY_EXTRACT_PYTHON` | `/usr/bin/python3` | Python interpreter for DOCX / PPTX / EPUB extraction / 文档提取 Python 解释器。 |
+| `STUDY_ANALYSIS_PYTHON` | `/usr/bin/python3` | Python interpreter for local math, statistics, and XLSX / 计算与统计 Python 解释器。 |
+| `STUDY_NODE_BINARY` | Installed app runtime or `node` on `PATH` / 已有 App 内置或 `PATH` | Standalone arm64 Node binary for macOS packaging / 打包 macOS 应用使用的独立 arm64 Node。 |
+| `STUDY_NATIVE_INSPECT` | `0` | Set to `1` to enable WKWebView Web Inspector in native app / 设为 `1` 开启原生窗口 Web Inspector 调试。 |
 
 ## License
 
 [MIT](LICENSE) · Copyright (c) 2026 Weilun Qian.
 
-Third-party components retain their respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md). / 第三方组件保留各自的许可证，详见[第三方说明](THIRD_PARTY_NOTICES.md)。
+Third-party components retain their respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md). / 第三方组件保留各自的许可证，详见 [第三方说明](THIRD_PARTY_NOTICES.md)。

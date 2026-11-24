@@ -1,0 +1,221 @@
+name: Build & Release macOS App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'server/**'
+      - 'shared/**'
+      - 'native/**'
+      - 'script/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
+      - '.github/workflows/build-macos.yml'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish or update GitHub Release for current package.json version tag (vX.Y.Z)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    name: macOS arm64 (.app / .dmg / .zip)
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up standalone arm64 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Inspect runner environment and versions
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_BIN="$(command -v node)"
+          echo "node_bin=$NODE_BIN" >> "$GITHUB_OUTPUT"
+          echo "Node binary: $NODE_BIN ($("$NODE_BIN" --version))"
+          file "$NODE_BIN"
+          otool -L "$NODE_BIN"
+
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' native/Info.plist)"
+          if [[ "$PKG_VERSION" != "$PLIST_VERSION" ]]; then
+            echo "::error::Version mismatch: package.json ($PKG_VERSION) != native/Info.plist ($PLIST_VERSION)"
+            exit 1
+          fi
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "$TAG_VERSION" != "$PKG_VERSION" ]]; then
+              echo "::error::Tag version ($GITHUB_REF_NAME) does not match package.json ($PKG_VERSION)"
+              exit 1
+            fi
+          fi
+          echo "version=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build web frontend
+        run: npm run build
+
+      - name: Run offline verification checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          for check in \
+            check-i18n \
+            check-model-policy \
+            check-markdown \
+            check-canvas \
+            check-teaching-ui \
+            check-final-messages \
+            check-final-stream \
+            check-chemistry-render-queue \
+            check-progressive-rendering \
+            check-learning \
+            check-practice-management \
+            check-material-management \
+            check-workspace-write \
+            check-requirements \
+            check-schedule \
+            check-course-avatar \
+            check-import-organizer \
+            check-import-state \
+            check-pdf-outline \
+            check-reading-position
+          do
+            echo "Running scripts/${check}.mjs..."
+            node "scripts/${check}.mjs"
+          done
+
+      - name: Build and verify Study Studio.app
+        shell: bash
+        env:
+          STUDY_NODE_BINARY: ${{ steps.meta.outputs.node_bin }}
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 script/package_macos.py --output build/release
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "build/release/Study Studio.app"
+
+      - name: Create distributable DMG, ZIP, and SHA-256 checksums
+        shell: bash
+        env:
+          APP_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/dist
+          ZIP_NAME="Study-Studio-v${APP_VERSION}-macos-arm64.zip"
+          DMG_NAME="Study-Studio-v${APP_VERSION}-macos-arm64.dmg"
+
+          # Preserve code signatures, executable permissions, and macOS bundle metadata
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "build/release/Study Studio.app" "build/dist/${ZIP_NAME}"
+
+          DMG_STAGE="$(mktemp -d "${RUNNER_TEMP:-/tmp}/study-studio-dmg.XXXXXX")"
+          trap 'rm -rf "$DMG_STAGE"' EXIT
+          /usr/bin/ditto "build/release/Study Studio.app" "$DMG_STAGE/Study Studio.app"
+          ln -s /Applications "$DMG_STAGE/Applications"
+          cp LICENSE THIRD_PARTY_NOTICES.md "$DMG_STAGE/"
+          /usr/bin/hdiutil create \
+            -volname "Study Studio ${APP_VERSION}" \
+            -srcfolder "$DMG_STAGE" \
+            -ov -format UDZO \
+            "build/dist/${DMG_NAME}"
+          rm -rf "$DMG_STAGE"
+          trap - EXIT
+
+          (
+            cd build/dist
+            shasum -a 256 "${DMG_NAME}" "${ZIP_NAME}" > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+            ls -lh
+          )
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Study-Studio-v${{ steps.meta.outputs.version }}-macos-arm64
+          path: build/dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.meta.outputs.version }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="${RUNNER_TEMP:-/tmp}/release-notes.md"
+          {
+            printf '## Study Studio %s (macOS Apple Silicon / arm64)\n\n' "$RELEASE_TAG"
+            printf '### 下载与安装（中文）\n'
+            printf '1. 下载下方 `Study-Studio-v%s-macos-arm64.dmg`（或 `.zip`），打开后将 **Study Studio.app** 拖入 `/Applications`（应用程序）文件夹。\n' "$APP_VERSION"
+            cat <<'EOF'
+          2. 本安装包采用 **ad-hoc 签名**（未经过 Apple Developer ID 公证）。若首次双击提示「已损坏，无法打开」或「无法验证开发者」，请打开「终端」执行：
+             ```sh
+             xattr -dr com.apple.quarantine "/Applications/Study Studio.app"
+             ```
+          3. **前置运行依赖**（安装包已内置原生外壳与独立 arm64 Node.js 运行时，但**不含**以下外部工具）：
+             - **必装**：安装并登录兼容的 [Codex CLI](https://developers.openai.com/codex/cli/)（需存在常规登录文件 `~/.codex/auth.json`）。
+             - **推荐**：安装 Poppler 以便 AI 读取 PDF 课件页面：`brew install poppler`
+             - **可选**：如需矢量化学结构式 / 反应式 / 机理图渲染，请按 README 配置 RDKit + `codex-organic-chem` Python 环境。
+
+          ### Download & Install (English)
+          EOF
+            printf '1. Download `Study-Studio-v%s-macos-arm64.dmg` (or `.zip`) below and drag **Study Studio.app** into `/Applications`.\n' "$APP_VERSION"
+            cat <<'EOF'
+          2. This package is **ad-hoc signed** (not notarized with an Apple Developer ID). If macOS Gatekeeper warns that the app is damaged or from an unidentified developer on first launch, run:
+             ```sh
+             xattr -dr com.apple.quarantine "/Applications/Study Studio.app"
+             ```
+          3. **External runtime prerequisites** (the bundle includes the native macOS shell and standalone arm64 Node.js runtime, but **does not** bundle the tools below):
+             - **Required**: Install and sign in to a compatible [Codex CLI](https://developers.openai.com/codex/cli/) with a regular `~/.codex/auth.json` file.
+             - **Recommended**: Install Poppler for AI PDF page reading: `brew install poppler`
+             - **Optional**: Configure RDKit + `codex-organic-chem` for native vector chemical structures, reactions, and mechanisms (see README).
+
+          ### Checksums (`SHA256SUMS.txt`)
+          ```text
+          EOF
+            cat build/dist/SHA256SUMS.txt
+            printf '```\n'
+          } > "$NOTES_FILE"
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "build/dist/Study-Studio-v${APP_VERSION}-macos-arm64.dmg" \
+              "build/dist/Study-Studio-v${APP_VERSION}-macos-arm64.zip" \
+              "build/dist/SHA256SUMS.txt" \
+              --clobber
+            gh release edit "$RELEASE_TAG" --title "Study Studio ${RELEASE_TAG}" --notes-file "$NOTES_FILE"
+          else
+            gh release create "$RELEASE_TAG" \
+              "build/dist/Study-Studio-v${APP_VERSION}-macos-arm64.dmg" \
+              "build/dist/Study-Studio-v${APP_VERSION}-macos-arm64.zip" \
+              "build/dist/SHA256SUMS.txt" \
+              --title "Study Studio ${RELEASE_TAG}" \
+              --notes-file "$NOTES_FILE" \
+              --target "$GITHUB_SHA"
+          fi
