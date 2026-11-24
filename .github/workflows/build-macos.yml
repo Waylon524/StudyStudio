@@ -100,7 +100,8 @@ jobs:
             check-schedule \
             check-course-avatar \
             check-import-organizer \
-            check-import-state
+            check-import-state \
+            check-chat-attachments
           do
             echo "Running scripts/${check}.mjs..."
             node "scripts/${check}.mjs"

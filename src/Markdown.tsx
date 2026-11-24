@@ -28,7 +28,7 @@ export function parseStudySource(value:string): {id:string;page?:number}|null {
 export function studyUrlTransform(value:string):string {
   return parseStudySource(value) ? value : defaultUrlTransform(value)
 }
-export function ChemistryFigure({kind,source,inline=false,ready=true}:{kind:string;source:string;inline?:boolean;ready?:boolean}) {
+export const ChemistryFigure=memo(function ChemistryFigure({kind,source,inline=false,ready=true}:{kind:string;source:string;inline?:boolean;ready?:boolean}) {
   const {locale,t}=useI18n()
   const key=kind+':'+source,{ref,near}=useNearViewport(ready)
   const [state,setState]=useState<{key:string;result?:FigureResult;error?:string}>(()=>({key,result:chemistryRenderQueue.peek(kind,source)}))
@@ -48,7 +48,7 @@ export function ChemistryFigure({kind,source,inline=false,ready=true}:{kind:stri
   const content=!ready?<Status className="figure-loading">{t('md.waitingStructure')}</Status>:!active?<Status className="figure-loading"/>:error?<Status role="alert" className="figure-error">{error}</Status>:!result?<Status className="figure-loading"><span className="spinner"/>{t('md.drawing')}</Status>:blocked?<Status className="figure-error" role="alert">{t('md.structureBlocked')}{result.warnings?.length?<span>{result.warnings.join(warnJoiner)}</span>:null}</Status>:result.svg?<ChemistrySvg svg={result.svg} source={source} kind={drawingKind as 'molecule'|'reaction'|'mechanism'} inline={inline}/>:<Status className="figure-error">{t('md.noStructureReturned')}</Status>
   if(inline)return <span ref={ref} className="chem-formula-inline">{content}</span>
   return <figure ref={ref} className="chem-figure" data-kind={kind}>{content}</figure>
-}
+})
 
 // Whole structural reactions and ordinary ce equations share the native vector
 // renderer. Formula-only ce, resonance and mixed mathematics remain in KaTeX.

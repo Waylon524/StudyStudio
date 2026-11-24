@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { memo, useMemo, useState } from 'react'
 import {
   AlignLeft,
   BookOpen,
@@ -65,7 +65,39 @@ type UnitGroup = {
   count: number
 }
 
-export function LearningArea({
+const FENCED_BLOCK_RE = /```[a-zA-Z0-9_-]*[^\n]*\n[\s\S]*?```/g
+const HAS_MARKDOWN_OR_MATH_RE = /[$\\`*_[\]<>#]/
+
+function previewPromptSource(prompt: string, isEn: boolean): string {
+  // 1-line collapsed previews clip to 2.2em; avoid mounting heavy RDKit/SVG blocks inside them.
+  const cleaned = prompt
+    .replace(FENCED_BLOCK_RE, match => {
+      const lang = /^```([a-zA-Z0-9_-]+)/.exec(match)?.[1]?.toLowerCase() || ''
+      if (lang === 'molecule' || lang === 'smiles') return isEn ? ' [Structure] ' : ' [结构式] '
+      if (lang === 'reaction' || lang === 'equation' || lang === 'formula') return isEn ? ' [Reaction] ' : ' [反应式] '
+      if (lang === 'mechanism') return isEn ? ' [Mechanism] ' : ' [机理图] '
+      return ' '
+    })
+    .replace(/\s+/g, ' ')
+    .trim()
+  return !HAS_MARKDOWN_OR_MATH_RE.test(cleaned) && cleaned.length > 260 ? cleaned.slice(0, 260) + '…' : cleaned
+}
+
+const PromptPreview = memo(function PromptPreview({
+  prompt,
+  isEn,
+  render,
+}: {
+  prompt: string
+  isEn: boolean
+  render: (text: string) => React.ReactNode
+}) {
+  const source = useMemo(() => previewPromptSource(prompt, isEn), [prompt, isEn])
+  if (!HAS_MARKDOWN_OR_MATH_RE.test(source)) return <>{source}</>
+  return <>{render(source)}</>
+})
+
+export const LearningArea = memo(function LearningArea({
   courseId,
   threadId,
   onAskAgent,
@@ -283,7 +315,9 @@ export function LearningArea({
               {questionTypeLabel(q.type)}
               {q.multiple ? t('practice.multipleTag') : ''}
             </span>
-            <span className="learning-prompt-preview">{render(q.prompt)}</span>
+            <span className="learning-prompt-preview">
+              <PromptPreview prompt={q.prompt} isEn={locale === 'en'} render={render} />
+            </span>
           </span>
           <span className={'learning-item-status ' + statusTone}>{statusLabel}</span>
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -584,4 +618,4 @@ export function LearningArea({
       )}
     </div>
   )
-}
+})

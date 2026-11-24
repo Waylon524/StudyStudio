@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useRef,useState} from 'react'
+import {memo,useEffect,useMemo,useRef,useState} from 'react'
 import type {ReactNode} from 'react'
 import {ArrowLeft,BookOpen,CalendarDays,ChevronDown,ChevronRight,FileCode2,FileSpreadsheet,FileText,Folder,FolderOpen,FolderPlus,Globe,GraduationCap,Image as ImageIcon,MessageSquarePlus,MoreHorizontal,Plus,Presentation,Search,SlidersHorizontal,Upload,X} from 'lucide-react'
 import {LearningArea} from './LearningArea'
@@ -58,7 +58,7 @@ function buildTree(sources:Source[],folders:CourseFolder[],naturalNames:Intl.Col
  sort(root);return root
 }
 
-export function CourseContextPanel({courseId,revision,tab,onTabChange,onUpload,onManageMaterials,onManagePractice,uploadInProgress,skippedCourseware,onOpenCourseware,onOpenDocument,onOpenCanvas,onAskAgent,onDraftMessage,onChanged,renderMarkdown,focusSourceId,focusSourcePage,currentSourceId}:Props){
+export const CourseContextPanel=memo(function CourseContextPanel({courseId,revision,tab,onTabChange,onUpload,onManageMaterials,onManagePractice,uploadInProgress,skippedCourseware,onOpenCourseware,onOpenDocument,onOpenCanvas,onAskAgent,onDraftMessage,onChanged,renderMarkdown,focusSourceId,focusSourcePage,currentSourceId}:Props){
  const {t,collator,folderDisplayName}=useI18n()
  const [sources,setSources]=useState<Source[]>([]),[folders,setFolders]=useState<CourseFolder[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState(false),[refresh,setRefresh]=useState(0)
  const [openedId,setOpenedId]=useState<string|null>(null),[detail,setDetail]=useState<SourceDetail|null>(null),[reading,setReading]=useState(false),[readError,setReadError]=useState(''),[focusUnavailable,setFocusUnavailable]=useState('')
@@ -226,4 +226,4 @@ export function CourseContextPanel({courseId,revision,tab,onTabChange,onUpload,o
    </section>}
   </div>
  </aside>
-}
+})

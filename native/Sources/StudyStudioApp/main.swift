@@ -162,27 +162,50 @@ final class StudyStudioDelegate: NSObject, NSApplicationDelegate, NSWindowDelega
         """
         (()=>{
           const mark=()=>{const root=document.documentElement;if(root&&!root.classList.contains('study-native-window'))root.classList.add('study-native-window')};mark();
+          const chromeSelector='.studio-topbar,.studio-course-add,.embed-pdf-reader-header,.pdf-reader-header,.doc-reader-header,.embed-pdf-download-menu,.pdf-download-menu';
+          const interactiveSelector='button,a[href],input,select,textarea,summary,[role="button"],[contenteditable="true"]';
+          const modalSelector='[aria-modal="true"],dialog[open],.teaching-canvas-backdrop';
           let queued=false;
           const publish=()=>{
             queued=false;mark();
             const header=document.querySelector('.studio-topbar');
             const height=Math.max(44,Math.min(96,header?.getBoundingClientRect().height||58));
-            const modal=!!document.querySelector('[aria-modal="true"],dialog[open],.teaching-canvas-backdrop');
+            const modal=!!document.querySelector(modalSelector);
             const rects=[];
             if(!modal){
-              for(const element of document.querySelectorAll('button,a[href],input,select,textarea,summary,[role="button"],[contenteditable="true"],iframe')){
-                const r=element.getBoundingClientRect();
-                if(r.width>0&&r.height>0&&r.top<height&&r.bottom>0&&r.right>0&&r.left<innerWidth){
-                  rects.push({x:Math.max(0,r.left-2),y:Math.max(0,r.top-2),width:Math.min(innerWidth,r.right+2)-Math.max(0,r.left-2),height:Math.min(height,r.bottom+2)-Math.max(0,r.top-2)});
-                  if(rects.length>=128)break;
+              const seen=new Set();
+              for(const root of document.querySelectorAll(chromeSelector)){
+                for(const element of root.querySelectorAll(interactiveSelector)){
+                  if(seen.has(element))continue;seen.add(element);
+                  const r=element.getBoundingClientRect();
+                  if(r.width>0&&r.height>0&&r.top<height&&r.bottom>0&&r.right>0&&r.left<innerWidth){
+                    rects.push({x:Math.max(0,r.left-2),y:Math.max(0,r.top-2),width:Math.min(innerWidth,r.right+2)-Math.max(0,r.left-2),height:Math.min(height,r.bottom+2)-Math.max(0,r.top-2)});
+                    if(rects.length>=128)break;
+                  }
                 }
+                if(rects.length>=128)break;
               }
             }
             window.webkit?.messageHandlers.studyChrome.postMessage({height,rects,modal});
           };
           const schedule=()=>{if(!queued){queued=true;requestAnimationFrame(publish)}};
-          new MutationObserver(schedule).observe(document,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','hidden','open','aria-expanded','aria-modal']});
-          addEventListener('resize',schedule);addEventListener('scroll',schedule,true);
+          const hasModalNode=(list)=>{for(const n of list){if(n&&n.nodeType===1&&(n.matches?.(modalSelector)||n.querySelector?.(modalSelector)))return true;}return false;};
+          const isRelevant=(records)=>{
+            for(const m of records){
+              const t=m.target;
+              if(!t||t.nodeType!==1)return true;
+              if(t.matches?.(modalSelector))return true;
+              if(t.closest?.('.reading-pane,.context-panel-body')){
+                if(hasModalNode(m.addedNodes)||hasModalNode(m.removedNodes))return true;
+                continue;
+              }
+              return true;
+            }
+            return false;
+          };
+          new MutationObserver((records)=>{if(isRelevant(records))schedule();}).observe(document,{childList:true,subtree:true,attributes:true,attributeFilter:['class','style','hidden','open','aria-expanded','aria-modal']});
+          addEventListener('resize',schedule);
+          addEventListener('transitionend',(e)=>{if(e.target?.classList?.contains?.('studio-panel-frame'))schedule();});
           document.addEventListener('DOMContentLoaded',()=>{mark();new ResizeObserver(schedule).observe(document.documentElement);schedule()},{once:true});
           schedule();
         })();

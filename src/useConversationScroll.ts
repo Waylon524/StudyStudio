@@ -54,7 +54,12 @@ export function useConversationScroll({scroller,content,progress,resetKey,enable
    if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' '].includes(event.key))cancelForInteraction()
    if(['ArrowUp','PageUp','Home'].includes(event.key))following.current=false
   }
-  const observer=new ResizeObserver(follow)
+  let resizeFrame:number|null=null
+  const onResize=()=>{
+   if(resizeFrame!==null)return
+   resizeFrame=requestAnimationFrame(()=>{resizeFrame=null;follow()})
+  }
+  const observer=new ResizeObserver(onResize)
   observer.observe(pane)
   if(pane.firstElementChild)observer.observe(pane.firstElementChild)
   pane.addEventListener('scroll',onScroll,{passive:true})
@@ -64,6 +69,7 @@ export function useConversationScroll({scroller,content,progress,resetKey,enable
   pane.addEventListener('keydown',onKey)
   follow()
   return()=>{
+   if(resizeFrame!==null)cancelAnimationFrame(resizeFrame)
    observer.disconnect();cancelAnimation()
    pane.removeEventListener('scroll',onScroll);pane.removeEventListener('wheel',onWheel)
    pane.removeEventListener('pointerdown',cancelForInteraction);pane.removeEventListener('touchstart',cancelForInteraction);pane.removeEventListener('keydown',onKey)

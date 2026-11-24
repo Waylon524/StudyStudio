@@ -1,4 +1,4 @@
-import { createElement, useId, useMemo, type CSSProperties, type ReactNode } from 'react'
+import { createElement, memo, useId, useMemo, type CSSProperties, type ReactNode } from 'react'
 import { useI18n } from './i18n'
 
 type ChemistryKind = 'molecule' | 'reaction' | 'mechanism'
@@ -204,7 +204,7 @@ export function sanitizeChemistrySvg(svg: string, scope: string): { svg: string;
   }
 }
 
-export function ChemistrySvg({ svg, source, inline = false, kind = 'molecule' }: { svg: string; source: string; inline?: boolean; kind?: ChemistryKind }) {
+export const ChemistrySvg = memo(function ChemistrySvg({ svg, source, inline = false, kind = 'molecule' }: { svg: string; source: string; inline?: boolean; kind?: ChemistryKind }) {
   const { t } = useI18n()
   const scope = `chem-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`
   const drawing = useMemo(() => {
@@ -231,4 +231,4 @@ export function ChemistrySvg({ svg, source, inline = false, kind = 'molecule' }:
   return <span className="chem-structure" data-kind={kind} data-inline={inline ? 'true' : undefined} role="math" aria-label={label} style={inline ? { width: style.width } : undefined}>
     <svg xmlns={SVG_NS} viewBox={drawing.viewBox.join(' ')} preserveAspectRatio="xMidYMid meet" style={inline ? { width: '100%', minWidth: style.minWidth, aspectRatio: style.aspectRatio } : style} aria-hidden="true" focusable="false">{drawing.content}</svg>
   </span>
-}
+})

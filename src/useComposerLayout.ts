@@ -1,9 +1,11 @@
-import {useCallback,useLayoutEffect,type RefObject} from 'react'
+import {useCallback,useLayoutEffect,useRef,type RefObject} from 'react'
 
 type ElementRef<T extends HTMLElement> = RefObject<T|null>
 type Props={input:ElementRef<HTMLTextAreaElement>;frame:ElementRef<HTMLElement>;area:ElementRef<HTMLDivElement>;scroller:ElementRef<HTMLElement>;value:string;auxiliaryKey:string}
 
 export function useComposerLayout({input,frame,area,scroller,value,auxiliaryKey}:Props){
+ const valueRef=useRef(value)
+ valueRef.current=value
  const fit=useCallback(()=>{
   const field=input.current,container=frame.current,overlay=area.current
   if(!field||!container||!overlay)return
@@ -21,22 +23,31 @@ export function useComposerLayout({input,frame,area,scroller,value,auxiliaryKey}
  useLayoutEffect(()=>{
   const container=frame.current
   if(!container)return
-  const observer=new ResizeObserver(fit);observer.observe(container)
-  window.addEventListener('resize',fit)
-  return()=>{observer.disconnect();window.removeEventListener('resize',fit)}
+  let raf:number|null=null
+  const scheduleFit=()=>{
+   // An empty composer never changes wrapped line count when container width animates.
+   if(!valueRef.current)return
+   if(raf!==null)return
+   raf=requestAnimationFrame(()=>{raf=null;fit()})
+  }
+  const observer=new ResizeObserver(scheduleFit);observer.observe(container)
+  window.addEventListener('resize',scheduleFit)
+  return()=>{if(raf!==null)cancelAnimationFrame(raf);observer.disconnect();window.removeEventListener('resize',scheduleFit)}
  },[fit,frame])
  useLayoutEffect(()=>{
   const overlay=area.current,container=frame.current
   if(!overlay||!container)return
-  let previous=0
+  let previous=0,raf:number|null=null
   const update=()=>{
+   raf=null
    const next=Math.ceil(overlay.getBoundingClientRect().height)+12
    if(next===previous)return
    const pane=scroller.current,pinned=!!pane&&pane.scrollHeight-pane.clientHeight-pane.scrollTop<32
    previous=next;container.style.setProperty('--composer-space',next+'px')
    if(pane&&pinned&&!container.classList.contains('is-empty'))pane.scrollTop=pane.scrollHeight
   }
-  const observer=new ResizeObserver(update);observer.observe(overlay);update()
-  return()=>observer.disconnect()
+  const schedule=()=>{if(raf===null)raf=requestAnimationFrame(update)}
+  const observer=new ResizeObserver(schedule);observer.observe(overlay);update()
+  return()=>{if(raf!==null)cancelAnimationFrame(raf);observer.disconnect()}
  },[area,frame,scroller])
 }

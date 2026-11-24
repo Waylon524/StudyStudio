@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import React, { createContext, memo, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Check, ChevronDown, ChevronRight, CircleHelp, RotateCcw, Eye, Layers, ImagePlus, X } from 'lucide-react'
 import type { CanvasSpec, SavedCanvas, LearningData, StudyAnswer, StudyAnswerImage, StudyAttempt, StudyContextValue, StudyQuestion, StudySpec, StudyType, UIBlock } from './study-types'
 import {TeachingCanvas} from './TeachingCanvas'
@@ -28,6 +28,7 @@ function courseLearning(courseId:string){
 }
 const emptyLearning=createLearningEntry(async()=>({items:[],attempts:[]}))
 export function notifyStudyChanged(courseId:string) {courseLearning(courseId).invalidate()}
+export function syncCourseLearning(courseId?:string, revision?:number) {if(courseId)courseLearning(courseId).ensure(revision)}
 export function useCourseLearning(courseId?:string, revision?:number) {
   const entry=courseId?courseLearning(courseId):emptyLearning
   const snapshot=useSyncExternalStore(entry.subscribe,entry.getSnapshot,entry.getSnapshot)
@@ -112,7 +113,7 @@ function CanvasBlock({block,disabled}:{block:UIBlock;disabled:boolean}){
   catch{return <p className="study-component-error" role="alert">{t('study.canvasInvalid')}</p>}
 }
 type QuestionCardProps={question:StudyQuestion;number?:number;disabled?:boolean;latestAttempt?:StudyAttempt|null;renderMarkdown?:(text:string)=>React.ReactNode;onSaved?:()=>void;onAskAgent?:(text:string)=>void}
-export function QuestionCard(props:QuestionCardProps){const context=useStudyContext();return <QuestionCardBody key={(context.courseId||'')+':'+(props.question.id||props.question.prompt)} {...props}/>}
+export const QuestionCard=memo(function QuestionCard(props:QuestionCardProps){const context=useStudyContext();return <QuestionCardBody key={(context.courseId||'')+':'+(props.question.id||props.question.prompt)} {...props}/>})
 function QuestionCardBody({question,number,disabled=false,latestAttempt,renderMarkdown,onSaved}:QuestionCardProps) {
   const {locale,t,questionTypeLabel,formatDateTime}=useI18n()
   const context=useStudyContext(),q=question
@@ -220,7 +221,7 @@ function QuestionCardBody({question,number,disabled=false,latestAttempt,renderMa
   </section>
 }
 
-export function LiveStudyBlock({source,streaming=false,blockId}:{source:string;streaming?:boolean;blockId?:string}) {
+export const LiveStudyBlock=memo(function LiveStudyBlock({source,streaming=false,blockId}:{source:string;streaming?:boolean;blockId?:string}) {
   const {t}=useI18n()
   const context=useStudyContext(),parsed=useMemo(()=>{const value=parseLiveStudy(source);if(blockId&&!value.spec.id)value.spec.id=blockId;return value},[source,blockId])
   const [saved,setSaved]=useState<StudyQuestion[]>([]),[error,setError]=useState(''),[saving,setSaving]=useState(false)
@@ -265,7 +266,7 @@ export function LiveStudyBlock({source,streaming=false,blockId}:{source:string;s
     {!streaming&&!context.courseId&&questions.length>0&&<p className="study-footnote">{t('study.selectCourseFootnote')}</p>}
     {error&&<p className="study-error" role="alert">{error}</p>}
   </div>
-}
+})
 
 function GenericBlock({block,resolveQuestion,disabled,depth=0}:{block:UIBlock;resolveQuestion:(question:StudyQuestion)=>StudyQuestion;disabled:boolean;depth?:number}) {
   const {t}=useI18n()

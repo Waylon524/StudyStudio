@@ -782,12 +782,41 @@ export class LearningStore {
   }
   async upload(course,{name,mime,data,folder='附件',intent}) {
     if (!Buffer.isBuffer(data) || data.length>MAX_MATERIAL_BYTES || (!data.length&&intent!=='courseware') || typeof name !== 'string' || !name || name.startsWith('.') || name.length>240 || /[\/\\\x00-\x1f]/.test(name)) throw Error('附件无效或超过 '+MATERIAL_SIZE_LABEL+'。');
+    const rawExt=path.extname(name).toLowerCase();
+    const resolvedMime=(typeof mime==='string'&&mime&&mime!=='application/octet-stream')?mime.slice(0,200):(mimeTypes[rawExt]||'application/octet-stream');
+    if(intent==='chat'){
+      await this.initCourse(course);
+      const safeExt=/^\.[a-z0-9]{1,12}$/i.test(rawExt)?rawExt:'';
+      const dir=await this.safePath(course,'.study-studio/chat-attachments');
+      await fs.mkdir(dir,{recursive:true,mode:0o700});
+      return this._mutate(course,async s=>{
+        const id=randomUUID(),relativePath=`.study-studio/chat-attachments/${id}${safeExt}`,dest=await this.safePath(course,relativePath);
+        await fs.writeFile(dest,data,{flag:'wx',mode:0o600});
+        const info={id,name,mime:resolvedMime,relativePath,size:data.length,createdAt:now(),scope:'chat'};
+        s.attachments.push(info);
+        return info;
+      });
+    }
     if(intent==='courseware'){
       validateCoursewareUpload({name,data});
       folder='课件';mime='application/pdf';
     }
     if(folder)await this.makeFolder(course,folder);else await this.initCourse(course);
-    return this._mutate(course,async s=>{ const id=randomUUID(),ext=path.extname(name),stem=name.slice(0,name.length-ext.length);let relativePath,dest;for(let n=0;n<10000;n++){const filename=n?`${stem} (${n})${ext}`:name;relativePath=folder?`${folder}/${filename}`:filename;if(internalFiles.has(relativePath))continue;dest=await this.safePath(course,relativePath);try{await fs.writeFile(dest,data,{flag:'wx',mode:0o600});break}catch(e){if(e.code!=='EEXIST'||n===9999)throw e;}}if(!dest)throw Error('无法保存附件。');const info={id,name,mime:typeof mime==='string'?mime.slice(0,200):'application/octet-stream',relativePath,size:data.length,createdAt:now()};s.attachments.push(info);return info; });
+    return this._mutate(course,async s=>{ const id=randomUUID(),ext=path.extname(name),stem=name.slice(0,name.length-ext.length);let relativePath,dest;for(let n=0;n<10000;n++){const filename=n?`${stem} (${n})${ext}`:name;relativePath=folder?`${folder}/${filename}`:filename;if(internalFiles.has(relativePath))continue;dest=await this.safePath(course,relativePath);try{await fs.writeFile(dest,data,{flag:'wx',mode:0o600});break}catch(e){if(e.code!=='EEXIST'||n===9999)throw e;}}if(!dest)throw Error('无法保存附件。');const info={id,name,mime:intent==='courseware'?'application/pdf':resolvedMime,relativePath,size:data.length,createdAt:now()};s.attachments.push(info);return info; });
+  }
+  async removeChatAttachment(course,id) {
+    if(typeof id!=='string'||!/^[0-9a-f-]{36}$/i.test(id))throw Object.assign(Error('附件 ID 无效。'),{status:400});
+    return this._mutate(course,async s=>{
+      const index=(s.attachments||[]).findIndex(a=>a.id===id);
+      if(index<0)return {removed:false};
+      const info=s.attachments[index];
+      if(info.scope!=='chat'||!info.relativePath.startsWith('.study-studio/chat-attachments/')){
+        throw Object.assign(Error('仅可移除对话临时附件，课程资料请在资料栏中管理。'),{status:400});
+      }
+      await fs.rm(await this.safePath(course,info.relativePath),{force:true});
+      s.attachments.splice(index,1);
+      return {removed:true,id};
+    });
   }
   async attachment(course,id) { await this.listSources(course); const s=await this._load(course); const info=s.attachments.find(x=>x.id===id); if (!info) throw Error('未找到附件。'); return {...info,absolutePath:await this.safePath(course,info.relativePath)}; }
   async _clearEmptyStagingParents(course,relativePath) {

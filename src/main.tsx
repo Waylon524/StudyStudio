@@ -1,13 +1,14 @@
 import {MAX_MATERIAL_BYTES,MATERIAL_SIZE_LABEL} from '../shared/file-limits.mjs';
+import {resolveDropZone,type DropZone} from '../shared/drop-zone.mjs'
 import {boundPdfSelection} from '../shared/pdf-selection.mjs'
 import {boundPdfRegion} from '../shared/pdf-markup.mjs'
-import React,{lazy,Suspense,useCallback,useEffect,useRef,useState} from 'react'
+import React,{lazy,memo,Suspense,useCallback,useEffect,useMemo,useRef,useState} from 'react'
 import {createRoot} from 'react-dom/client'
-import {Plus,ArrowUp,ArrowDown,Square,PanelLeft,PanelRight,ChevronDown,Paperclip,Settings,X,FileText,Upload} from 'lucide-react'
+import {Plus,ArrowUp,ArrowDown,Square,PanelLeft,PanelRight,ChevronDown,Paperclip,Settings,X,FileText,FolderOpen,Presentation,MessageSquarePlus,Download} from 'lucide-react'
 import {Markdown} from './Markdown'
 import {MarkdownReader} from './MarkdownReader'
 import {HtmlReader} from './HtmlReader'
-import {notifyStudyChanged,studyApi} from './StudyComponents'
+import {notifyStudyChanged,studyApi,syncCourseLearning} from './StudyComponents'
 import type {CanvasSpec,OpenCanvasMeta,SavedCanvas} from './study-types'
 import {isHtmlSource,isMarkdownSource,isPdfSource} from './source-types'
 import {ConversationMessages,type ConversationMessage as Message,type MessageAttachment as Attachment} from './ConversationMessages'
@@ -60,10 +61,11 @@ const EmbeddedPdfReader=lazy(()=>import('./EmbedPdfReader').then(module=>({defau
 function LegacyFallbackReader(props:PdfReaderProps){
  return <LegacyPdfReader {...props} annotationReadOnly/>
 }
-function CoursePdfReader({annotationUpdates,outlineUpdates,onFocusQuestion,...props}:PdfReaderProps&{annotationUpdates?:PdfAnnotationUpdate;outlineUpdates?:PdfOutlineUpdate;onFocusQuestion?:()=>void}){
+const CoursePdfReader=memo(function CoursePdfReader({annotationUpdates,outlineUpdates,onFocusQuestion,...props}:PdfReaderProps&{annotationUpdates?:PdfAnnotationUpdate;outlineUpdates?:PdfOutlineUpdate;onFocusQuestion?:()=>void}){
  const [fallback,setFallback]=useState(false)
- return <Suspense fallback={null}>{fallback?<LegacyFallbackReader {...props} annotationUpdates={annotationUpdates} outlineUpdates={outlineUpdates}/>:<EmbeddedPdfReader {...props} annotationUpdates={annotationUpdates} outlineUpdates={outlineUpdates} onFocusQuestion={onFocusQuestion} onViewerError={()=>setFallback(true)}/>}</Suspense>
-}
+ const handleViewerError=useCallback(()=>setFallback(true),[])
+ return <Suspense fallback={null}>{fallback?<LegacyFallbackReader {...props} annotationUpdates={annotationUpdates} outlineUpdates={outlineUpdates}/>:<EmbeddedPdfReader {...props} annotationUpdates={annotationUpdates} outlineUpdates={outlineUpdates} onFocusQuestion={onFocusQuestion} onViewerError={handleViewerError}/>}</Suspense>
+})
 function pdfSelectionPreview(text:string){
  const characters=Array.from(text.replace(/\s+/g,' ').trim())
  return characters.length>12?characters.slice(0,12).join('')+'…':characters.join('')
@@ -94,13 +96,14 @@ function App(){
  const [textSelectionReset,setTextSelectionReset]=useState(0)
  const pdfSelectionRef=useRef<PdfSelection|null>(null)
  const [leftWidth,setLeftWidth]=useState(()=>Number(localStorage.getItem('study-studio:left-width'))||280),[pdfWidth,setPdfWidth]=useState(()=>Number(localStorage.getItem('study-studio:pdf-width'))||600),[screenWidth,setScreenWidth]=useState(innerWidth)
- const readingRef=useRef<Reading|null>(null),readerSequence=useRef(0),readerWrites=useRef(new Map<string,Promise<any>>()),resizeRef=useRef<{side:'left'|'right';x:number;width:number}|null>(null)
+ const readingRef=useRef<Reading|null>(null),readerSequence=useRef(0),readerWrites=useRef(new Map<string,Promise<any>>()),resizeRef=useRef<{side:'left'|'right';x:number;width:number;currentWidth:number}|null>(null),resizeRaf=useRef<number|null>(null)
+ const leftFrameRef=useRef<HTMLDivElement|null>(null),rightFrameRef=useRef<HTMLDivElement|null>(null),leftPaneRef=useRef<HTMLElement|null>(null),rightPaneRef=useRef<HTMLElement|null>(null)
  const [input,setInput]=useState(''),[busy,setBusy]=useState(false),[turnId,setTurnId]=useState<string|null>(null),[error,setError]=useState(''),[progress,setProgress]=useState('')
  const [adding,setAdding]=useState(false),[courseName,setCourseName]=useState(''),[revision,setRevision]=useState(0)
  const [settingsOpen,setSettingsOpen]=useState(false),[settingsSection,setSettingsSection]=useState<SettingsSection>('materials'),[managedCourses,setManagedCourses]=useState<ManagedCourse[]|null>(null),[settingsLoading,setSettingsLoading]=useState(false),[settingsError,setSettingsError]=useState('')
  const settingsLoad=useRef(0)
  const [skippedCourseware,setSkippedCourseware]=useState<string[]>([])
- const [pendingFiles,setPendingFiles]=useState<Attachment[]>([]),[uploading,setUploading]=useState(false),[dragging,setDragging]=useState(false)
+ const [pendingFiles,setPendingFiles]=useState<Attachment[]>([]),[uploading,setUploading]=useState(false),[draggingFiles,setDraggingFiles]=useState(false),[activeDropZone,setActiveDropZone]=useState<DropZone|null>(null),[previewAttachment,setPreviewAttachment]=useState<Attachment|null>(null)
  const turnOutputs=useRef(new Map<string,any>())
  const finalStream=useRef(createFinalStream()),streamFrame=useRef<number|null>(null),lastStreamPaint=useRef(0),[hasFinalOutput,setHasFinalOutput]=useState(false)
  const events=useRef<EventSource|null>(null),activeThread=useRef<string|null>(null),activeCourse=useRef('general'),busyRef=useRef(false),activation=useRef(0),fileInput=useRef<HTMLInputElement>(null),uploadTarget=useRef<UploadTarget>('conversation'),composerInput=useRef<HTMLTextAreaElement>(null)
@@ -234,6 +237,7 @@ function App(){
   if(target.__studyOpenSettingsRequested)open()
   return()=>{window.removeEventListener('study:open-settings',open);window.removeEventListener('keydown',shortcut)}
  },[])
+ useEffect(()=>{syncCourseLearning(courseId,revision)},[courseId,revision])
  useEffect(()=>{
   const update=()=>{if(document.visibilityState==='visible')refresh()}
   window.addEventListener('focus',update);document.addEventListener('visibilitychange',update)
@@ -282,7 +286,13 @@ function App(){
   api('/courses').then(value=>{if(!alive)return;setCourses(value.courses);const saved=localStorage.getItem('study-studio:active-course');void activateCourse(value.courses.some((c:Course)=>c.id===saved)?saved!:value.courses[0]?.id||'general')}).catch(e=>{if(alive){setError(e.message);setLoadingCourse(false)}})
   return ()=>{alive=false;activation.current++;events.current?.close();resetFinalOutput(false)}
  },[])
- useEffect(()=>{const resize=()=>setScreenWidth(innerWidth),escape=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!document.querySelector('[aria-modal="true"]')){if(innerWidth<900)setReaderVisible(false);if(innerWidth<1000)setLeftOpen(false);setAdding(false)}};window.addEventListener('resize',resize);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('resize',resize);window.removeEventListener('keydown',escape)}},[])
+ useEffect(()=>{const resize=()=>setScreenWidth(innerWidth),escape=(e:KeyboardEvent)=>{if(e.key==='Escape'){if(previewAttachment){setPreviewAttachment(null);return}if(!document.querySelector('[aria-modal="true"]')){if(innerWidth<900)setReaderVisible(false);if(innerWidth<1000)setLeftOpen(false);setAdding(false)}}};window.addEventListener('resize',resize);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('resize',resize);window.removeEventListener('keydown',escape)}},[previewAttachment])
+ useEffect(()=>{
+  if(!draggingFiles)return
+  const clear=()=>{setDraggingFiles(false);setActiveDropZone(null)}
+  window.addEventListener('dragend',clear);window.addEventListener('drop',clear);window.addEventListener('blur',clear)
+  return()=>{window.removeEventListener('dragend',clear);window.removeEventListener('drop',clear);window.removeEventListener('blur',clear)}
+ },[draggingFiles])
  useEffect(()=>{localStorage.setItem('study-studio:left-open',String(leftOpen))},[leftOpen])
  useEffect(()=>{localStorage.setItem(PRESET_STORAGE_KEY,preset);localStorage.removeItem(LEGACY_EFFORT_STORAGE_KEY)},[preset])
  useEffect(()=>{if(catalogModels.length&&!turnModelAvailable)setError(tCurrent('composer.presetUnavailable',{preset:presetLabel,model:turnModel,effort:effort?' ('+effort+')':''}))},[preset,presetLabel,turnModel,effort,catalogModels,turnModelAvailable,loadingCourse])
@@ -331,7 +341,7 @@ function App(){
   if(activeCourse.current!==id){setFocusSource(undefined)}
   clearPdfSelection()
   const readerSeq=++readerSequence.current;readingRef.current=null;setReading(null);setReaderVisible(false);setOpeningPdf(false)
-  turnOutputs.current.clear();activeCourse.current=id;setCourseId(id);localStorage.setItem('study-studio:active-course',id);setThreadId(null);setMessages([]);setPendingFiles([]);setSkippedCourseware([]);setError('');setProgress('');setInput('');setLoadingCourse(true)
+  turnOutputs.current.clear();activeCourse.current=id;setCourseId(id);localStorage.setItem('study-studio:active-course',id);setThreadId(null);setMessages([]);setPendingFiles([]);setPreviewAttachment(null);setSkippedCourseware([]);setError('');setProgress('');setInput('');setLoadingCourse(true)
   try{
    const value=await api('/courses/'+encodeURIComponent(id)+'/conversation',model?{model}:{})
    if(seq!==activation.current)return
@@ -391,31 +401,48 @@ function App(){
  async function stop(){if(!threadId||!turnId)return;try{await api('/interrupt',{threadId,turnId})}catch(e:any){setError(e.message)}}
  async function addCourse(event:React.FormEvent){event.preventDefault();if(!courseName.trim())return;try{const created=await createManagedCourse(courseName);setAdding(false);setCourseName('');await activateCourse(created.id)}catch(e:any){setError(e.message)}}
  async function upload(files:FileList|File[]|null,target=uploadTarget.current){
-  const attach=target==='conversation',courseware=target==='courseware'
-  if(!files?.length||(attach&&(busy||loadingCourse))||uploading)return
-  setUploading(true);setError('')
+  const attach=target==='conversation',courseware=target==='courseware',list=files?Array.from(files):[]
+  if(!list.length||uploading)return
+  if(attach&&(busy||loadingCourse)){setError(tCurrent('app.waitForBusy'));return}
+  let toUpload=list
+  if(attach){
+   const remaining=Math.max(0,10-pendingFiles.length)
+   if(remaining===0){setError(tCurrent('composer.attachLimit'));return}
+   if(list.length>remaining){setError(tCurrent('composer.attachLimit'));toUpload=list.slice(0,remaining)}
+  }
+  setUploading(true)
+  if(!attach||list.length<=Math.max(0,10-pendingFiles.length))setError('')
   if(courseware)setSkippedCourseware([])
   const base='/api/courses/'+encodeURIComponent(courseId),added:string[]=[],skipped:string[]=[]
   try{
-   for(const file of Array.from(files)){
+   for(const file of toUpload){
     try{
      if(courseware&&(!/\.pdf$/i.test(file.name)||!/^%PDF-[0-9]\.[0-9][\t\n\f\r ]/.test(await file.slice(0,9).text()))){
       skipped.push(file.name);continue
      }
      if(file.size>MAX_MATERIAL_BYTES)throw new Error(tCurrent('composer.fileTooLarge',{name:file.name,limit:MATERIAL_SIZE_LABEL}))
      const folder=['待整理',file.webkitRelativePath?.split('/').slice(0,-1).join('/')].filter(Boolean).join('/')
-     const response=await fetch(base+'/attachments',{method:'POST',headers:{
+     const headers:Record<string,string>={
       'Content-Type':file.type||'application/octet-stream','x-file-name':encodeURIComponent(file.name),
-      ...(courseware?{'x-upload-intent':'courseware'}:{'x-folder':encodeURIComponent(folder)}),
-     },body:file})
+     }
+     if(attach)headers['x-upload-intent']='chat'
+     else if(courseware)headers['x-upload-intent']='courseware'
+     else headers['x-folder']=encodeURIComponent(folder)
+     const response=await fetch(base+'/attachments',{method:'POST',headers,body:file})
      const value=await response.json()
      if(!response.ok)throw new Error(value.error||tCurrent('composer.uploadFailed'))
      added.push(value.attachment.id)
-     if(attach)setPendingFiles(old=>[...old,value.attachment])
-     setLeftTab(courseware?'courseware':'sources');setLeftOpen(true);refresh()
+     if(attach){
+      setPendingFiles(old=>[...old,value.attachment])
+     }else{
+      setLeftTab(courseware?'courseware':'sources');setLeftOpen(true);refresh()
+     }
     }catch(error:any){setError(error.message)}
    }
-   if(added.length&&!courseware){
+   if(added.length&&attach){
+    composerInput.current?.focus({preventScroll:true})
+   }
+   if(added.length&&!courseware&&!attach){
     try{for(let offset=0;offset<added.length;offset+=100)await api('/courses/'+encodeURIComponent(courseId)+'/imports',{attachmentIds:added.slice(offset,offset+100)});refresh()}
     catch(error:any){setError(tCurrent('composer.autoOrgNotStarted',{reason:error.message}))}
    }
@@ -423,6 +450,19 @@ function App(){
    if(skipped.length&&activeCourse.current===courseId){setSkippedCourseware(skipped);setLeftTab('courseware');setLeftOpen(true)}
    setUploading(false);if(fileInput.current)fileInput.current.value=''
   }
+ }
+ function removePendingFile(file:Attachment){
+  setPendingFiles(old=>old.filter(item=>item.id!==file.id))
+  if(file.scope==='chat'){
+   void fetch('/api/courses/'+encodeURIComponent(courseId)+'/attachments/'+encodeURIComponent(file.id),{method:'DELETE'}).catch(()=>{})
+  }
+ }
+ function handleComposerPaste(event:React.ClipboardEvent<HTMLTextAreaElement>){
+  const files=event.clipboardData?.files
+  const plainText=event.clipboardData?.getData('text/plain')
+  if(!files?.length||plainText)return
+  event.preventDefault()
+  void upload(files,'conversation')
  }
  function chooseFiles(target:UploadTarget='conversation'){uploadTarget.current=target;fileInput.current?.click()}
  const askAgent=useEventCallback((text:string)=>{if(innerWidth<1000)setLeftOpen(false);if(innerWidth<900)setReaderVisible(false);void sendText(text,[])})
@@ -510,14 +550,83 @@ function App(){
  }
  const onMessageSource=useEventCallback(openSource)
  const renderMarkdown=useCallback((text:string)=><Markdown text={text} allowStudy={false} onOpenSource={onMessageSource}/>,[onMessageSource])
- async function openAttachment(a:Attachment){const course=courseId,seq=activation.current;try{const value=await api('/courses/'+encodeURIComponent(course)+'/sources');if(seq!==activation.current||activeCourse.current!==course)return;const source=value.sources.find((s:Source)=>s.attachmentId===a.id);if(source)void openSource(source.id);else setError(tCurrent('composer.attachmentUnavailable'))}catch(e:any){if(seq===activation.current&&activeCourse.current===course)setError(e.message)}}
+ function attachmentDownloadUrl(course:string,a:Attachment){return (a.url||'/api/courses/'+encodeURIComponent(course)+'/attachments/'+encodeURIComponent(a.id))}
+ function triggerAttachmentDownload(course:string,a:Attachment){
+  const link=document.createElement('a')
+  link.href=attachmentDownloadUrl(course,a)+'?download=1'
+  link.download=a.name
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+ }
+ async function openAttachment(a:Attachment){
+  const course=courseId,seq=activation.current
+  if(a.scope==='chat'){
+   if(a.mime?.startsWith('image/')){setPreviewAttachment(a);return}
+   triggerAttachmentDownload(course,a);return
+  }
+  try{
+   const value=await api('/courses/'+encodeURIComponent(course)+'/sources')
+   if(seq!==activation.current||activeCourse.current!==course)return
+   const source=value.sources.find((s:Source)=>s.attachmentId===a.id)
+   if(source){void openSource(source.id);return}
+   if(a.mime?.startsWith('image/')){setPreviewAttachment(a);return}
+   triggerAttachmentDownload(course,a)
+  }catch(e:any){if(seq===activation.current&&activeCourse.current===course)setError(e.message)}
+ }
  const onMessageAttachment=useEventCallback(openAttachment)
+ const onSidebarUpload=useEventCallback((target:'sources'|'courseware')=>chooseFiles(target))
+ const onManageMaterials=useEventCallback(()=>showSettings('materials'))
+ const onManagePractice=useEventCallback(()=>showSettings('practice'))
+ const onSidebarOpenCourseware=useEventCallback((source:Source,page?:number)=>{void openCourseware(source,page)})
+ const onSidebarOpenDocument=useEventCallback(openDocument)
+ const onSidebarDraftMessage=useEventCallback((text:string)=>{setInput(text);if(innerWidth<1000)setLeftOpen(false);if(innerWidth<900)setReaderVisible(false);composerInput.current?.focus()})
+ const onPdfPageChange=useEventCallback(changePage)
+ const onCloseReader=useEventCallback(closeReader)
+ const onAskPdfSelection=useEventCallback(askAboutPdfSelection)
+ const pdfReaderSource=useMemo(()=>reading?.kind==='pdf'?{id:reading.source.id,name:reading.source.name,url:reading.source.url||'/api/courses/'+encodeURIComponent(courseId)+'/sources/'+encodeURIComponent(reading.source.id)+'/file'}:null,[courseId,reading?.kind==='pdf'?reading.source.id:null,reading?.kind==='pdf'?reading.source.name:null,reading?.kind==='pdf'?reading.source.url:null])
  const actualLeftWidth=Math.max(220,Math.min(420,leftWidth))
  const actualPdfWidth=Math.max(360,Math.min(pdfWidth,Math.max(360,screenWidth-(leftOpen&&screenWidth>1100?actualLeftWidth:0)-340)))
- function resizeStart(event:React.PointerEvent<HTMLDivElement>,side:'left'|'right'){event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId);resizeRef.current={side,x:event.clientX,width:side==='left'?actualLeftWidth:actualPdfWidth};document.documentElement.classList.add('studio-resizing')}
- function resizeMove(event:React.PointerEvent<HTMLDivElement>){const drag=resizeRef.current;if(!drag)return;const delta=event.clientX-drag.x;if(drag.side==='left')setLeftWidth(Math.max(220,Math.min(420,drag.width+delta)));else setPdfWidth(Math.max(360,Math.min(Math.max(360,screenWidth-(leftOpen?actualLeftWidth:0)-340),drag.width-delta)))}
- function resizeEnd(event:React.PointerEvent<HTMLDivElement>){if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);resizeRef.current=null;document.documentElement.classList.remove('studio-resizing');localStorage.setItem('study-studio:left-width',String(leftWidth));localStorage.setItem('study-studio:pdf-width',String(pdfWidth))}
- function resizeKey(event:React.KeyboardEvent<HTMLDivElement>,side:'left'|'right'){if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const change=event.key==='ArrowRight'?20:-20;if(side==='left')setLeftWidth(value=>Math.max(220,Math.min(420,value+change)));else setPdfWidth(value=>Math.max(360,Math.min(Math.max(360,screenWidth-(leftOpen?actualLeftWidth:0)-340),value-change)))}
+ function applyLiveResize(side:'left'|'right',nextWidth:number){
+  const frame=side==='left'?leftFrameRef.current:rightFrameRef.current
+  const pane=side==='left'?leftPaneRef.current:rightPaneRef.current
+  if(frame)frame.style.setProperty('--panel-width',(nextWidth+5)+'px')
+  if(pane)pane.style.width=nextWidth+'px'
+ }
+ function resizeStart(event:React.PointerEvent<HTMLDivElement>,side:'left'|'right'){
+  event.preventDefault();event.currentTarget.setPointerCapture(event.pointerId)
+  const startWidth=side==='left'?actualLeftWidth:actualPdfWidth
+  resizeRef.current={side,x:event.clientX,width:startWidth,currentWidth:startWidth}
+  document.documentElement.classList.add('studio-resizing')
+ }
+ function resizeMove(event:React.PointerEvent<HTMLDivElement>){
+  const drag=resizeRef.current;if(!drag)return
+  const delta=event.clientX-drag.x
+  const nextWidth=drag.side==='left'
+   ?Math.max(220,Math.min(420,drag.width+delta))
+   :Math.max(360,Math.min(Math.max(360,screenWidth-(leftOpen?actualLeftWidth:0)-340),drag.width-delta))
+  if(nextWidth===drag.currentWidth)return
+  drag.currentWidth=nextWidth
+  if(resizeRaf.current!==null)return
+  resizeRaf.current=requestAnimationFrame(()=>{
+   resizeRaf.current=null
+   const active=resizeRef.current
+   if(active)applyLiveResize(active.side,active.currentWidth)
+  })
+ }
+ function resizeEnd(event:React.PointerEvent<HTMLDivElement>){
+  if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId)
+  if(resizeRaf.current!==null){cancelAnimationFrame(resizeRaf.current);resizeRaf.current=null}
+  const finished=resizeRef.current
+  resizeRef.current=null
+  document.documentElement.classList.remove('studio-resizing')
+  if(finished){
+   applyLiveResize(finished.side,finished.currentWidth)
+   if(finished.side==='left'){setLeftWidth(finished.currentWidth);localStorage.setItem('study-studio:left-width',String(finished.currentWidth))}
+   else{setPdfWidth(finished.currentWidth);localStorage.setItem('study-studio:pdf-width',String(finished.currentWidth))}
+  }
+ }
+ function resizeKey(event:React.KeyboardEvent<HTMLDivElement>,side:'left'|'right'){if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const change=event.key==='ArrowRight'?20:-20;if(side==='left')setLeftWidth(value=>{const next=Math.max(220,Math.min(420,value+change));localStorage.setItem('study-studio:left-width',String(next));return next});else setPdfWidth(value=>{const next=Math.max(360,Math.min(Math.max(360,screenWidth-(leftOpen?actualLeftWidth:0)-340),value-change));localStorage.setItem('study-studio:pdf-width',String(next));return next})}
 
  const currentReadingSourceId=reading&&reading.kind!=='canvas'?reading.source.id:undefined
  const readerToggleLabel=reading?.kind==='pdf'?t('topbar.readerKind.pdf'):reading?.kind==='markdown'?t('topbar.readerKind.markdown'):reading?.kind==='html'?t('topbar.readerKind.html'):t('topbar.readerKind.canvas')
@@ -529,22 +638,31 @@ function App(){
     ?t('composer.placeholder.interactive')
     :t('composer.placeholder.default')
  const currentCourseName=courseDisplayName(course)
+ const sidebarPrimaryZone:DropZone=leftTab==='courseware'?'courseware':'sources'
+ const sidebarSecondaryZone:DropZone=sidebarPrimaryZone==='courseware'?'sources':'courseware'
+ const clearDragState=()=>{setDraggingFiles(false);setActiveDropZone(null)}
 
- return <div className="studio-shell" onDragOverCapture={e=>{if((e.target as HTMLElement).closest?.('[data-study-answer-input],.settings-backdrop'))setDragging(false)}} onDropCapture={e=>{if((e.target as HTMLElement).closest?.('[data-study-answer-input],.settings-backdrop'))setDragging(false)}} onDragOver={e=>{if(settingsOpen||(e.target as HTMLElement).closest?.('.settings-backdrop'))return;if(e.dataTransfer.types.includes('Files')){e.preventDefault();setDragging(true)}}} onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget as Node))setDragging(false)}} onDrop={e=>{if(settingsOpen||(e.target as HTMLElement).closest?.('.settings-backdrop'))return;e.preventDefault();setDragging(false);void upload(e.dataTransfer.files,(e.target as Element).closest?.('[data-courseware-drop-zone]')?'courseware':'conversation')}}>
+ return <div className={'studio-shell'+(draggingFiles?' is-dragging-files':'')} onDragOverCapture={e=>{if((e.target as HTMLElement).closest?.('[data-study-answer-input],.settings-backdrop'))clearDragState()}} onDropCapture={e=>{if((e.target as HTMLElement).closest?.('[data-study-answer-input],.settings-backdrop'))clearDragState()}} onDragOver={e=>{if(settingsOpen||(e.target as HTMLElement).closest?.('.settings-backdrop,[data-study-answer-input]'))return;if(Array.from(e.dataTransfer.types||[]).includes('Files')){e.preventDefault();e.dataTransfer.dropEffect='copy';if(!draggingFiles)setDraggingFiles(true);const nextZone=resolveDropZone(e.target,{leftOpen,leftTab});setActiveDropZone(prev=>prev===nextZone?prev:nextZone)}}} onDragLeave={e=>{if(!e.relatedTarget||!e.currentTarget.contains(e.relatedTarget as Node))clearDragState()}} onDrop={e=>{if(settingsOpen||(e.target as HTMLElement).closest?.('.settings-backdrop,[data-study-answer-input]'))return;e.preventDefault();const zone=resolveDropZone(e.target,{leftOpen,leftTab});clearDragState();void upload(e.dataTransfer.files,zone)}}>
   <input ref={fileInput} type="file" multiple className="sr-only" aria-label={t('topbar.uploadFilesAria')} onChange={e=>upload(e.target.files)}/>
-  {dragging&&<div className="drop-overlay"><Upload size={30}/><strong>{t('topbar.dropAddTo',{course:currentCourseName})}</strong></div>}
   <header className="studio-topbar"><div className="studio-header-left"><button className="icon-button" aria-label={leftOpen?t('topbar.collapseSidebar'):t('topbar.expandSidebar')} aria-expanded={leftOpen} onClick={()=>{setLeftOpen(!leftOpen);if(!leftOpen&&innerWidth<1000)setReaderVisible(false)}}><PanelLeft size={19}/></button><a className="studio-brand" href="/" onClick={e=>e.preventDefault()}><span>Study Studio</span></a><span className="studio-header-divider"/><label className="studio-course-picker"><span className="sr-only">{t('topbar.course')}</span>{!loadingCourse&&<CourseAvatar courseId={courseId} size={24}/>}<select aria-label={t('topbar.course')} value={courseId} onChange={e=>void activateCourse(e.target.value)} disabled={busy||uploading}>{courses.map(c=><option key={c.id} value={c.id}>{courseDisplayName(c)}</option>)}</select><ChevronDown size={13}/></label><button className="icon-button" aria-label={t('topbar.addCourse')} onClick={()=>setAdding(v=>!v)} disabled={busy||uploading||loadingCourse}><Plus size={16}/></button></div><div className="studio-header-right">{openingPdf&&<span className="studio-opening"><span className="spinner"/>{t('topbar.openingCourseware')}</span>}{reading&&!readerVisible&&<button className="reader-toggle" aria-label={readerVisible?t('topbar.collapseReader'):t('topbar.expandReader')} onClick={()=>{setReaderVisible(!readerVisible);if(innerWidth<1000)setLeftOpen(false)}}><PanelRight size={17}/><span>{readerToggleLabel}</span></button>}<button type="button" className="icon-button studio-settings-button" aria-label={t('topbar.settings')} title={t('topbar.settingsTitle')} onClick={()=>showSettings()}><Settings size={17}/></button><span className={'connection-dot '+(status?.authenticated?'online':'')} title={status?.authenticated?t('app.codexConnected'):t('app.codexConnecting')}/></div></header>
   {adding&&<form className="studio-course-add" onSubmit={addCourse}><input autoFocus aria-label={t('topbar.newCourseName')} placeholder={t('topbar.courseNamePlaceholder')} value={courseName} onChange={e=>setCourseName(e.target.value)} maxLength={80}/><button type="submit">{t('app.add')}</button><button type="button" aria-label={t('topbar.cancelAddCourse')} onClick={()=>setAdding(false)}><X size={15}/></button></form>}
   <main className="studio-body">
-   {leftOpen&&<button className="studio-left-scrim" aria-label={t('topbar.closeSidebarScrim')} onClick={()=>setLeftOpen(false)}/>}<AnimatedSidebar open={leftOpen} width={actualLeftWidth+5} side="left"><aside className="studio-left" style={{width:actualLeftWidth}} data-courseware-drop-zone={leftOpen&&leftTab==='courseware'?'':undefined}><CourseContextPanel key={courseId} courseId={courseId} revision={revision} tab={leftTab} onTabChange={setLeftTab} onUpload={chooseFiles} onManageMaterials={()=>showSettings('materials')} onManagePractice={()=>showSettings('practice')} uploadInProgress={uploading} skippedCourseware={skippedCourseware} onOpenCourseware={(source,page)=>void openCourseware(source,page)} onOpenDocument={openDocument} onOpenCanvas={onOpenCanvas} currentSourceId={currentReadingSourceId} onAskAgent={askAgent} onDraftMessage={text=>{setInput(text);if(innerWidth<1000)setLeftOpen(false);if(innerWidth<900)setReaderVisible(false);composerInput.current?.focus()}} onChanged={refresh} renderMarkdown={renderMarkdown} focusSourceId={focusSource?.id} focusSourcePage={focusSource?.page}/></aside><div className="studio-resizer left" role="separator" aria-label={t('topbar.resizeLeft')} aria-orientation="vertical" aria-valuemin={220} aria-valuemax={420} aria-valuenow={actualLeftWidth} tabIndex={0} onPointerDown={e=>resizeStart(e,'left')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} onKeyDown={e=>resizeKey(e,'left')} onDoubleClick={()=>setLeftWidth(280)}/></AnimatedSidebar>
-   <section ref={conversationFrame} className={'conversation'+(!loadingCourse&&!messages.length?' is-empty':'')}>
+   {leftOpen&&<button className="studio-left-scrim" aria-label={t('topbar.closeSidebarScrim')} onClick={()=>setLeftOpen(false)}/>}<AnimatedSidebar open={leftOpen} width={actualLeftWidth+5} side="left" keepMounted frameRef={leftFrameRef}><aside ref={leftPaneRef} className="studio-left" style={{width:actualLeftWidth}} data-drop-zone={leftOpen?sidebarPrimaryZone:undefined}><CourseContextPanel key={courseId} courseId={courseId} revision={revision} tab={leftTab} onTabChange={setLeftTab} onUpload={onSidebarUpload} onManageMaterials={onManageMaterials} onManagePractice={onManagePractice} uploadInProgress={uploading} skippedCourseware={skippedCourseware} onOpenCourseware={onSidebarOpenCourseware} onOpenDocument={onSidebarOpenDocument} onOpenCanvas={onOpenCanvas} currentSourceId={currentReadingSourceId} onAskAgent={askAgent} onDraftMessage={onSidebarDraftMessage} onChanged={refresh} renderMarkdown={renderMarkdown} focusSourceId={focusSource?.id} focusSourcePage={focusSource?.page}/>{draggingFiles&&leftOpen&&<div className={'zone-drop-overlay is-sidebar'+(activeDropZone===sidebarPrimaryZone?' is-active':'')} aria-hidden="true"><div className="zone-drop-card">{sidebarPrimaryZone==='courseware'?<Presentation size={24}/>:<FolderOpen size={24}/>}<strong>{sidebarPrimaryZone==='courseware'?t('drop.coursewareTitle',{course:currentCourseName}):t('drop.sourcesTitle',{course:currentCourseName})}</strong><span>{sidebarPrimaryZone==='courseware'?t('drop.coursewareDesc'):t('drop.sourcesDesc')}</span></div><div className={'drop-zone-pill'+(activeDropZone===sidebarSecondaryZone?' is-active':'')} data-drop-zone={sidebarSecondaryZone}>{sidebarSecondaryZone==='courseware'?<Presentation size={15}/>:<FolderOpen size={15}/>}<span>{sidebarSecondaryZone==='courseware'?t('drop.switchToCourseware'):t('drop.switchToSources')}</span></div></div>}</aside><div className="studio-resizer left" role="separator" aria-label={t('topbar.resizeLeft')} aria-orientation="vertical" aria-valuemin={220} aria-valuemax={420} aria-valuenow={actualLeftWidth} tabIndex={0} onPointerDown={e=>resizeStart(e,'left')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} onKeyDown={e=>resizeKey(e,'left')} onDoubleClick={()=>setLeftWidth(280)}/></AnimatedSidebar>
+   <section ref={conversationFrame} className={'conversation'+(!loadingCourse&&!messages.length?' is-empty':'')} data-drop-zone="conversation">
     <h1 className="sr-only">{currentCourseName}</h1>
     <section ref={conversationScroller} className="reading-pane" aria-label={t('course.conversationAria')}><div className="reading-column messages">
-     {loadingCourse?<div className="course-loading"><span className="spinner"/>{t('course.opening')}</div>:!messages.length?<div className="welcome"><div className="welcome-title"><CourseAvatar courseId={courseId} size={48}/><h2>{t('course.welcome')}</h2></div></div>:<ConversationMessages messages={messages} courseId={courseId} threadId={threadId} revision={revision} onLearningChange={refresh} onAskAgent={askAgent} onOpenSource={onMessageSource} onOpenAttachment={onMessageAttachment} onOpenCanvas={onOpenCanvas} renderMarkdown={renderMarkdown}/>}
+     {loadingCourse?<div className="course-loading"><span className="spinner"/>{t('course.opening')}</div>:!messages.length?<div className="welcome"><div className="welcome-title"><CourseAvatar courseId={courseId} size={48}/><h2>{t('course.welcome')}</h2></div></div>:<ConversationMessages messages={messages} courseId={courseId} threadId={threadId} onLearningChange={refresh} onAskAgent={askAgent} onOpenSource={onMessageSource} onOpenAttachment={onMessageAttachment} onOpenCanvas={onOpenCanvas} renderMarkdown={renderMarkdown}/>}
      {busy&&!hasFinalOutput&&<ThinkingIndicator courseId={courseId} preset={preset}/>}<div className="message-end"/>
     </div></section>
+    {draggingFiles&&<div className={'zone-drop-overlay is-chat'+(activeDropZone==='conversation'?' is-active':'')} aria-hidden="true">
+     {!leftOpen&&<div className="drop-zone-dock">
+      <div className={'drop-zone-dock-item'+(activeDropZone==='sources'?' is-active':'')} data-drop-zone="sources"><FolderOpen size={18}/><div><strong>{t('drop.dockSources')}</strong><span>{t('drop.dockSourcesHint')}</span></div></div>
+      <div className={'drop-zone-dock-item'+(activeDropZone==='courseware'?' is-active':'')} data-drop-zone="courseware"><Presentation size={18}/><div><strong>{t('drop.dockCourseware')}</strong><span>{t('drop.dockCoursewareHint')}</span></div></div>
+     </div>}
+     <div className="zone-drop-card"><MessageSquarePlus size={26}/><strong>{t('drop.chatTitle')}</strong><span>{t('drop.chatDesc')}</span></div>
+    </div>}
     <div className="composer-area" ref={composerOverlay}><div className="composer-column">{showScrollToBottom&&<button type="button" className="conversation-bottom-button" aria-label={t('composer.scrollBottom')} title={t('composer.scrollBottom')} onPointerDown={event=>event.preventDefault()} onClick={scrollToBottom}><ArrowDown size={17}/></button>}{error&&<div className="app-error" role="alert"><span>{error}</span>{!threadId&&<button onClick={()=>void activateCourse(courseId)}>{t('app.retry')}</button>}<button aria-label={t('app.closeError')} onClick={()=>setError('')}>×</button></div>}
-     {!!pendingFiles.length&&<div className="pending-attachments">{pendingFiles.map(a=><span key={a.id}><FileText size={13}/>{a.name}<button type="button" aria-label={t('composer.removeAttachment',{name:a.name})} onClick={()=>setPendingFiles(old=>old.filter(f=>f.id!==a.id))}><X size={12}/></button></span>)}</div>}
+     {!!pendingFiles.length&&<div className="pending-attachments">{pendingFiles.map(a=><span key={a.id}><FileText size={13}/>{a.name}<button type="button" aria-label={t('composer.removeAttachment',{name:a.name})} onClick={()=>removePendingFile(a)}><X size={12}/></button></span>)}</div>}
      {pdfSelection&&<div className="pending-attachments">
       <span className="pdf-selection-chip">
        <FileText size={13}/>
@@ -553,7 +671,7 @@ function App(){
        <button type="button" aria-label={'text' in pdfSelection?t('composer.removePdfText'):t('composer.removePdfRegion')} onClick={clearPdfSelection}><X size={12}/></button>
       </span>
      </div>}
-     <form className="composer" onSubmit={send}>
+     <form className={'composer'+(draggingFiles&&activeDropZone==='conversation'?' is-drop-target':'')} onSubmit={send}>
       <textarea
        ref={composerInput}
        aria-label={t('composer.aria')}
@@ -561,21 +679,35 @@ function App(){
        value={input}
        rows={1}
        onChange={event=>setInput(event.target.value)}
+       onPaste={handleComposerPaste}
        onCompositionStart={()=>{composerComposition.current.active=true}}
        onCompositionEnd={()=>{composerComposition.current={active:false,endedAt:performance.now()}}}
        onBlur={()=>{composerComposition.current.active=false}}
        onKeyDown={handleComposerKeyDown}
       />
-      <div className="composer-footer"><div className="composer-options"><button type="button" className="attach-button icon-button" aria-label={t('composer.attach')} title={t('composer.attach')} onClick={()=>chooseFiles()} disabled={busy||uploading||loadingCourse}><Paperclip size={18}/></button><EffortToggle value={preset} configs={presetConfigs} onChange={value=>{setPreset(value);setError('')}} disabled={busy||loadingCourse||!model}/>{uploading&&<span className="uploading-label">{t('app.adding')}</span>}</div><button type="button" className="continue-button" onClick={()=>void sendText('',[],'continue')} disabled={busy||!messages.some(message=>message.role==='assistant'&&message.text.trim())||!status?.authenticated||uploading||loadingCourse||!threadId||!model||!turnModelAvailable}>{t('composer.continue')}</button>{busy?<button type="button" className="send-button stop" aria-label={t('composer.stop')} onClick={stop} disabled={!turnId}><Square size={16}/></button>:<button className="send-button" type="submit" aria-label={t('composer.send')} disabled={(!input.trim()&&!pendingFiles.length)||!status?.authenticated||uploading||loadingCourse||!threadId||!model||!turnModelAvailable}><ArrowUp size={19}/></button>}</div></form>
+      <div className="composer-footer"><div className="composer-options"><button type="button" className="attach-button icon-button" aria-label={t('composer.attach')} title={t('composer.attach')} onClick={()=>chooseFiles('conversation')} disabled={busy||uploading||loadingCourse}><Paperclip size={18}/></button><EffortToggle value={preset} configs={presetConfigs} onChange={value=>{setPreset(value);setError('')}} disabled={busy||loadingCourse||!model}/>{uploading&&<span className="uploading-label">{t('app.adding')}</span>}</div><button type="button" className="continue-button" onClick={()=>void sendText('',[],'continue')} disabled={busy||!messages.some(message=>message.role==='assistant'&&message.text.trim())||!status?.authenticated||uploading||loadingCourse||!threadId||!model||!turnModelAvailable}>{t('composer.continue')}</button>{busy?<button type="button" className="send-button stop" aria-label={t('composer.stop')} onClick={stop} disabled={!turnId}><Square size={16}/></button>:<button className="send-button" type="submit" aria-label={t('composer.send')} disabled={(!input.trim()&&!pendingFiles.length)||!status?.authenticated||uploading||loadingCourse||!threadId||!model||!turnModelAvailable}><ArrowUp size={19}/></button>}</div></form>
     </div></div>
    </section>
-   <AnimatedSidebar open={Boolean(reading&&readerVisible)} width={actualPdfWidth+5} side="right">{reading&&<><div className="studio-resizer right" role="separator" aria-label={t('topbar.resizeRight')} aria-orientation="vertical" aria-valuemin={360} aria-valuemax={Math.max(360,screenWidth-340)} aria-valuenow={actualPdfWidth} tabIndex={0} onPointerDown={e=>resizeStart(e,'right')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} onKeyDown={e=>resizeKey(e,'right')} onDoubleClick={()=>setPdfWidth(600)}/><aside className="studio-pdf" style={{width:actualPdfWidth}}>
-    {reading.kind==='pdf'?<CoursePdfReader key={courseId+':'+reading.source.id} annotationUpdates={pdfAnnotationUpdate?.courseId===courseId&&pdfAnnotationUpdate.sourceId===reading.source.id?pdfAnnotationUpdate:undefined} outlineUpdates={pdfOutlineUpdate?.courseId===courseId&&pdfOutlineUpdate.sourceId===reading.source.id?pdfOutlineUpdate:undefined} keyboardEnabled={readerVisible} courseId={courseId} source={{id:reading.source.id,name:reading.source.name,url:reading.source.url||'/api/courses/'+encodeURIComponent(courseId)+'/sources/'+encodeURIComponent(reading.source.id)+'/file'}} page={reading.page} onPageChange={changePage} onClose={closeReader} onTextSelectionChange={capturePdfSelection} textSelectionReset={textSelectionReset} regionSelection={pdfSelection&&'region' in pdfSelection?pdfSelection:null} onRegionSelectionChange={capturePdfRegion} onFocusQuestion={askAboutPdfSelection} onAskSelection={screenWidth<900&&pdfSelection?askAboutPdfSelection:undefined}/>
-    :reading.kind==='markdown'?<MarkdownReader key={courseId+':md:'+reading.source.id} courseId={courseId} source={reading.source} revision={revision} onClose={closeReader} onOpenSource={onMessageSource} onAskAboutDocument={askAboutDocument}/>
-    :reading.kind==='html'?<HtmlReader key={courseId+':html:'+reading.source.id} kind="file" courseId={courseId} source={reading.source} revision={revision} visible={readerVisible} onClose={closeReader} onAskAboutDocument={askAboutDocument}/>
-    :<HtmlReader key={courseId+':canvas:'+reading.canvas.id+':'+(reading.itemId||'')} kind="canvas" canvas={reading.canvas} saved={Boolean(reading.savedCanvas)} onSave={reading.threadId&&reading.itemId?saveActiveCanvas:undefined} onReport={reading.savedCanvas?reportActiveCanvas:undefined} visible={readerVisible} onClose={closeReader} onAskAboutCanvas={askAboutCanvas}/>}
+   <AnimatedSidebar open={Boolean(reading&&readerVisible)} width={actualPdfWidth+5} side="right" keepMounted={Boolean(reading)} frameRef={rightFrameRef}>{reading&&<><div className="studio-resizer right" role="separator" aria-label={t('topbar.resizeRight')} aria-orientation="vertical" aria-valuemin={360} aria-valuemax={Math.max(360,screenWidth-340)} aria-valuenow={actualPdfWidth} tabIndex={0} onPointerDown={e=>resizeStart(e,'right')} onPointerMove={resizeMove} onPointerUp={resizeEnd} onPointerCancel={resizeEnd} onKeyDown={e=>resizeKey(e,'right')} onDoubleClick={()=>setPdfWidth(600)}/><aside ref={rightPaneRef} className="studio-pdf" style={{width:actualPdfWidth}} data-drop-zone="conversation">
+    {reading.kind==='pdf'?(pdfReaderSource&&<CoursePdfReader key={courseId+':'+reading.source.id} annotationUpdates={pdfAnnotationUpdate?.courseId===courseId&&pdfAnnotationUpdate.sourceId===reading.source.id?pdfAnnotationUpdate:undefined} outlineUpdates={pdfOutlineUpdate?.courseId===courseId&&pdfOutlineUpdate.sourceId===reading.source.id?pdfOutlineUpdate:undefined} keyboardEnabled={readerVisible} courseId={courseId} source={pdfReaderSource} page={reading.page} onPageChange={onPdfPageChange} onClose={onCloseReader} onTextSelectionChange={capturePdfSelection} textSelectionReset={textSelectionReset} regionSelection={pdfSelection&&'region' in pdfSelection?pdfSelection:null} onRegionSelectionChange={capturePdfRegion} onFocusQuestion={onAskPdfSelection} onAskSelection={screenWidth<900&&pdfSelection?onAskPdfSelection:undefined}/>)
+    :reading.kind==='markdown'?<MarkdownReader key={courseId+':md:'+reading.source.id} courseId={courseId} source={reading.source} revision={revision} onClose={onCloseReader} onOpenSource={onMessageSource} onAskAboutDocument={askAboutDocument}/>
+    :reading.kind==='html'?<HtmlReader key={courseId+':html:'+reading.source.id} kind="file" courseId={courseId} source={reading.source} revision={revision} visible={readerVisible} onClose={onCloseReader} onAskAboutDocument={askAboutDocument}/>
+    :<HtmlReader key={courseId+':canvas:'+reading.canvas.id+':'+(reading.itemId||'')} kind="canvas" canvas={reading.canvas} saved={Boolean(reading.savedCanvas)} onSave={reading.threadId&&reading.itemId?saveActiveCanvas:undefined} onReport={reading.savedCanvas?reportActiveCanvas:undefined} visible={readerVisible} onClose={onCloseReader} onAskAboutCanvas={askAboutCanvas}/>}
+    {draggingFiles&&<div className={'zone-drop-overlay is-reader'+(activeDropZone==='conversation'?' is-active':'')} aria-hidden="true"><div className="zone-drop-card"><MessageSquarePlus size={24}/><strong>{t('drop.chatTitle')}</strong><span>{t('drop.chatDesc')}</span></div></div>}
    </aside></>}</AnimatedSidebar>
   </main>
+  {previewAttachment&&<div className="attachment-lightbox" role="dialog" aria-modal="true" aria-label={t('composer.previewAttachmentAria',{name:previewAttachment.name})} onClick={e=>{if(e.target===e.currentTarget)setPreviewAttachment(null)}}>
+   <div className="attachment-lightbox-card">
+    <div className="attachment-lightbox-head">
+     <strong title={previewAttachment.name}>{previewAttachment.name}</strong>
+     <div className="attachment-lightbox-actions">
+      <a href={attachmentDownloadUrl(courseId,previewAttachment)+'?download=1'} download={previewAttachment.name} aria-label={t('composer.downloadAttachment')} title={t('composer.downloadAttachment')}><Download size={16}/></a>
+      <button type="button" aria-label={t('app.close')} onClick={()=>setPreviewAttachment(null)}><X size={17}/></button>
+     </div>
+    </div>
+    <div className="attachment-lightbox-body"><img src={attachmentDownloadUrl(courseId,previewAttachment)} alt={previewAttachment.name}/></div>
+   </div>
+  </div>}
   {settingsOpen&&<SettingsPage revision={revision} initialSection={settingsSection} courses={managedCourses||courses} activeCourseId={courseId} currentSourceId={currentReadingSourceId} conversationBusy={busy||uploading} loading={settingsLoading} loadError={settingsError} preset={preset} onPresetChange={value=>{setPreset(value);setError('')}} presetConfigs={presetConfigs} onSavePresetConfigs={savePresetConfigs} onResetPresetConfigs={resetPresetConfigs} catalogModels={catalogModels} onRefreshModels={refreshModels} status={status} leftOpen={leftOpen} onToggleLeftOpen={()=>setLeftOpen(v=>!v)} onResetLayout={resetLayoutWidths} onCreate={async name=>{await createManagedCourse(name);void loadSettingsCourses()}} onArchive={async(id,archived)=>{await archiveManagedCourse(id,archived);void loadSettingsCourses()}} onOpen={openManagedCourse} onChanged={()=>{refresh();void loadSettingsCourses()}} onOpenSource={openSourceFromSettings} onSourcesDeleted={handleSourcesDeleted} onSourceRenamed={handleSourceRenamed} onClose={()=>setSettingsOpen(false)}/>}
  </div>
 }
