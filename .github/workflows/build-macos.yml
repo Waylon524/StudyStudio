@@ -132,7 +132,7 @@ jobs:
           trap 'rm -rf "$DMG_STAGE"' EXIT
           /usr/bin/ditto "build/release/Study Studio.app" "$DMG_STAGE/Study Studio.app"
           ln -s /Applications "$DMG_STAGE/Applications"
-          cp LICENSE THIRD_PARTY_NOTICES.md "$DMG_STAGE/"
+          cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$DMG_STAGE/"
           /usr/bin/hdiutil create \
             -volname "Study Studio ${APP_VERSION}" \
             -srcfolder "$DMG_STAGE" \

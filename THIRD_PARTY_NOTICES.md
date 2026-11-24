@@ -1,13 +1,14 @@
 # Third-party notices / 第三方声明
 
 Study Studio's original source code and documentation are licensed under the
-[MIT License](LICENSE), copyright © 2026 Weilun Qian. Third-party software,
-services, fonts, and assets retain their respective licenses and terms. The
-project's MIT license does not relicense them.
+[Apache License, Version 2.0](LICENSE), copyright © 2026 Weilun Qian (see
+[NOTICE](NOTICE)). Third-party software, services, fonts, and assets retain their
+respective licenses and terms. The project's Apache-2.0 license does not
+relicense them.
 
-Study Studio 的原创源码和文档采用 [MIT 许可证](LICENSE)，版权归 2026 Weilun Qian
-所有。第三方软件、服务、字体和资源仍适用各自的许可或服务条款，不因本项目采用
-MIT 而改变。
+Study Studio 的原创源码和文档采用 [Apache License 2.0 许可证](LICENSE)，版权归
+2026 Weilun Qian 所有（详见 [NOTICE](NOTICE)）。第三方软件、服务、字体和资源仍
+适用各自的许可或服务条款，不因本项目采用 Apache-2.0 而改变。
 
 | Component / 组件 | Use / 用途 | Upstream / 上游 |
 | --- | --- | --- |
@@ -17,7 +18,9 @@ MIT 而改变。
 | Lucide | UI icons / 界面图标 | [lucide-icons/lucide](https://github.com/lucide-icons/lucide), ISC |
 | react-markdown, remark, rehype, micromark | Markdown and math processing / Markdown 与数学解析 | [unified](https://github.com/unifiedjs), [micromark](https://github.com/micromark), MIT |
 | KaTeX and its mhchem extension | Mathematical and chemical notation / 数学与化学排版 | [KaTeX/KaTeX](https://github.com/KaTeX/KaTeX), MIT |
-| PDF.js | Local PDF reading and resources / 本地 PDF 阅读与配套资源 | [mozilla/pdf.js](https://github.com/mozilla/pdf.js), Apache-2.0 and resource-specific licenses / 另有资源独立许可 |
+| EmbedPDF (`@embedpdf/*`) | Primary PDF viewer & annotation engine (derived from PDFium; not affiliated with or endorsed by Google) / 主 PDF 阅读与批注引擎（派生自 PDFium） | [embedpdf/embed-pdf-viewer](https://github.com/embedpdf/embed-pdf-viewer), Apache-2.0 (bundled fallback/signature fonts under Apache-2.0 and SIL OFL-1.1; see `public/embedpdf-licenses/`) |
+| Noto Sans SC | Bundled Chinese PDF rendering font / 随应用打包的中文字体 | [notofonts/noto-cjk](https://github.com/notofonts/noto-cjk), SIL OFL-1.1 (see `public/embedpdf-fonts/OFL.txt`) |
+| PDF.js | Fallback local PDF reading, outline inspection, and resources / 备用本地 PDF 阅读、目录提取与配套资源 | [mozilla/pdf.js](https://github.com/mozilla/pdf.js), Apache-2.0 and resource-specific licenses / 另有资源独立许可 |
 | codex-organic-chem | Optional external chemistry engine / 可选外部化学绘图引擎 | [LaoZhong-Mihari/codex-organic-chem](https://github.com/LaoZhong-Mihari/codex-organic-chem), core MIT / 核心 MIT |
 
 ## Dependency and asset distribution / 依赖与资源分发
@@ -25,6 +28,9 @@ MIT 而改变。
 - JavaScript dependencies are installed through npm and are not vendored in this
   source repository. Refer to each installed package for its complete copyright
   and license notices, including transitive dependencies.
+- EmbedPDF third-party notices and font licenses under `public/embedpdf-licenses/`
+  and `public/embedpdf-fonts/OFL.txt` are included in the frontend build and
+  packaged application. Preserve those notices when redistributing.
 - PDF.js resources under `public/pdfjs/` are generated from the installed
   `pdfjs-dist` package and are excluded from Git. The preparation script preserves
   the upstream license files. These resources include separately licensed fonts,
@@ -44,6 +50,8 @@ MIT 而改变。
 
 - JavaScript 依赖通过 npm 安装，不随源码仓库一并提交；完整版权和许可声明以各安装包
   为准，传递依赖同样适用。
+- `public/embedpdf-licenses/` 与 `public/embedpdf-fonts/OFL.txt` 中的 EmbedPDF
+  第三方说明和字体许可证会随前端构建一起打入应用包；再分发时须予以保留。
 - `public/pdfjs/` 从已安装的 `pdfjs-dist` 生成并排除在 Git 外；准备脚本保留上游的
   许可证。字体、CMap、WebAssembly 解码器和色彩配置文件可能分别适用不同许可。
   Liberation 字体资源采用 GPLv2 加字体嵌入例外；其他资源另有 Apache、BSD、MIT 或

@@ -39,7 +39,7 @@
   "overrides": {
     "katex": "0.18.7"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Weilun Qian",
   "description": "A local-first AI study workspace with persistent course conversations, PDF reading, and interactive practice.",
   "repository": {

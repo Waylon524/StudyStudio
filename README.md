@@ -8,7 +8,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/Waylon524/StudyStudio?label=Release)](https://github.com/Waylon524/StudyStudio/releases)
 [![Platform](https://img.shields.io/badge/macOS-14%2B%20Apple%20Silicon-black)](https://github.com/Waylon524/StudyStudio/releases)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933)](https://nodejs.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 [中文文档](#中文) · [English Documentation](#english) · [下载安装包 / Releases](https://github.com/Waylon524/StudyStudio/releases) · [环境变量 / Configuration](#configuration)
 
@@ -471,6 +471,6 @@ Set these environment variables before starting the backend / 在启动后端前
 
 ## License
 
-[MIT](LICENSE) · Copyright (c) 2026 Weilun Qian.
+[Apache-2.0](LICENSE) · Copyright (c) 2026 Weilun Qian · See [NOTICE](NOTICE).
 
 Third-party components retain their respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md). / 第三方组件保留各自的许可证，详见 [第三方说明](THIRD_PARTY_NOTICES.md)。
