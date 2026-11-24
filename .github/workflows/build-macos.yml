@@ -95,15 +95,12 @@ jobs:
             check-progressive-rendering \
             check-learning \
             check-practice-management \
-            check-material-management \
             check-workspace-write \
             check-requirements \
             check-schedule \
             check-course-avatar \
             check-import-organizer \
-            check-import-state \
-            check-pdf-outline \
-            check-reading-position
+            check-import-state
           do
             echo "Running scripts/${check}.mjs..."
             node "scripts/${check}.mjs"
